@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Version>1.6.5</Version><AssemblyName>Windock</AssemblyName><ApplicationIcon>Assets\logo.ico</ApplicationIcon><Company>windock</Company><Product>windock</Product><Title>windock</Title><Description>栖于桌边，触手可及</Description>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+<ItemGroup><Resource Include="Assets\logo.png" /><Resource Include="Assets\NotificationLogos\*.png"/><Resource Include="Assets\NotificationLogos\*.svg"/><Content Include="Assets\NotificationLogos\*.txt" CopyToOutputDirectory="PreserveNewest"/><Content Include="Assets\logo.ico" TargetPath="windock-icon-v2.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /><Content Include="Everything64.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/><Content Include="Everything\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/></ItemGroup></Project>
+
+
+
+
+
+

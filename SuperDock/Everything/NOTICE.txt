@@ -1,0 +1,23 @@
+Third-party components bundled with Superun
+============================================
+
+All components below are from voidtools (https://www.voidtools.com/) and are
+distributed under the MIT-style license included next to this file as License.txt.
+Copyright (C) voidtools. The copyright and permission notice are reproduced in
+License.txt, as required by the license.
+
+1. Everything 1.4.1.1032 (x64 portable)
+   Files: Everything.exe, Everything.lng
+   Source: https://www.voidtools.com/Everything-1.4.1.1032.x64.zip
+   SHA256 of the downloaded ZIP:
+   698df475ec44e638f66f1b6a32d28fea613cec78d3b6310e6abe53431eeb940c
+
+2. ES command line client (es.exe)
+   File: es.exe
+   Source: https://www.voidtools.com/es.zip
+   Used to query Everything instances that run with a custom -instance name,
+   which the Everything SDK v2 cannot address.
+
+Everything is started in the background only when no usable Everything
+instance is already running. Its configuration and index database are stored
+under %LOCALAPPDATA%\Superun\Everything, not inside the install directory.

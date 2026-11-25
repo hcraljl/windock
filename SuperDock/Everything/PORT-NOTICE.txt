@@ -1,0 +1,7 @@
+Everything search port
+======================
+The complete SearchWindow XAML, code-behind, view models, category glyphs, search-history preferences, native clipboard helper, file previews, rename dialog, confirmation dialog and Everything services were ported from F:/mycode/superun.
+Window layout and interactions are retained. Windock adapters map the original resource keys to its light/dark glass themes, reuse its icon cache, add the Dock menu action and configurable global shortcut, and keep search/history settings separate from Superun.
+The original SDK remains included. Queries use the source project's bounded ES client for both default and named Everything instances to avoid indefinite SDK waits on this computer. Background single-flight queries discard stale results.
+Everything64.dll, Everything.exe and es.exe are distributed with the original voidtools NOTICE.txt and License.txt.
+No administrator elevation or service installation is performed automatically. Existing indexes are reused; first-time bundled configuration also includes ordinary-permission personal folders.

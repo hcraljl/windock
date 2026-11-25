@@ -1,0 +1,5 @@
+Notification logo asset sources:
+QQ PNG, Feishu/WeCom/DingTalk SVG: https://github.com/Renly1994/xiaotang-daozai/tree/main/assets
+Redistributed with the upstream MIT license in LICENSE-upstream.txt.
+WeChat fallback is an independently drawn conversation-bubble symbol. Installed application icons are preferred when available.
+Application names and trademarks belong to their respective owners.

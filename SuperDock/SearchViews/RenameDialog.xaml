@@ -1,0 +1,130 @@
+<Window x:Class="SuperDock.SearchViews.RenameDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="重命名"
+        Width="440"
+        Height="176"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI, Microsoft YaHei UI"
+        Foreground="{DynamicResource TextBrush}"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <SolidColorBrush x:Key="DialogBrush" Color="#1F2022" />
+        <SolidColorBrush x:Key="DialogBorderBrush" Color="#3B3D42" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#252628" />
+        <SolidColorBrush x:Key="TileBrush" Color="#2B2D30" />
+        <SolidColorBrush x:Key="TileHoverBrush" Color="#35373B" />
+        <SolidColorBrush x:Key="InputBrush" Color="#2A2C2F" />
+        <SolidColorBrush x:Key="IconTileBrush" Color="#303236" />
+        <SolidColorBrush x:Key="PreviewBrush" Color="#242527" />
+        <SolidColorBrush x:Key="LineBrush" Color="#3A3D42" />
+        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#25272A" />
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#565A61" />
+        <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#747A84" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#98A2AE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#8AB4F8" />
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#2A3542" />
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#8AB4F8" />
+        <SolidColorBrush x:Key="PrimaryTextBrush" Color="#111418" />
+
+        <Style x:Key="DialogButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="76" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource TileBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource TileHoverBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="{DynamicResource DialogBrush}"
+            BorderBrush="{DynamicResource DialogBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            MouseLeftButtonDown="Border_MouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" ShadowDepth="5" Opacity="0.35" Color="#000000" />
+        </Border.Effect>
+
+        <Grid Margin="18,16,18,14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="重命名"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextBrush}" />
+
+            <Border Grid.Row="1"
+                    Margin="0,12,0,0"
+                    Background="{DynamicResource InputBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="10,6">
+                <TextBox x:Name="NameBox"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         FontSize="14"
+                         Foreground="{DynamicResource TextBrush}"
+                         CaretBrush="{DynamicResource AccentBrush}"
+                         VerticalContentAlignment="Center" />
+            </Border>
+
+            <TextBlock Grid.Row="2"
+                       x:Name="HintText"
+                       Margin="2,6,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource MutedBrush}"
+                       TextTrimming="CharacterEllipsis" />
+
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right">
+                <Button Content="取消"
+                        Style="{StaticResource DialogButtonStyle}"
+                        Margin="0,0,8,0"
+                        Click="Cancel_Click" />
+                <Button Content="确定"
+                        Style="{StaticResource DialogButtonStyle}"
+                        Background="{DynamicResource PrimaryBrush}"
+                        Foreground="{DynamicResource PrimaryTextBrush}"
+                        BorderBrush="{DynamicResource PrimaryBrush}"
+                        Click="Confirm_Click" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,31 @@
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+namespace SuperDock;
+public partial class MainWindow
+{
+    [DllImport("user32.dll",SetLastError=true)]static extern bool RegisterHotKey(IntPtr h,int id,uint modifiers,uint key);
+    [DllImport("user32.dll")]static extern bool UnregisterHotKey(IntPtr h,int id);
+    string registeredShortcut="";bool manuallyHidden;
+    internal static string ShortcutStatus {get;private set;}="等待注册";
+    string? fileSearchRegistered;
+    internal static string FileSearchShortcutStatus {get;private set;}="等待注册";
+    void UpdateFileSearchShortcut(){var desired=settings.FileSearchHotkeyEnabled?settings.FileSearchHotkey:"";if(fileSearchRegistered==desired)return;fileSearchRegistered=desired;var h=new WindowInteropHelper(this).Handle;UnregisterHotKey(h,0x5146);bool space=desired=="Alt+Space";FileSearchShortcutStatus=desired==""?"已关闭":RegisterHotKey(h,0x5146,(space?1u:3u)|0x4000,space?0x20u:0x46u)?"已启用":"快捷键被其他程序占用，请更换，或点击 Dock 搜索图标";}
+    void UpdateShortcut()
+    {
+        if(!IsLoaded||!HandlesGlobalShortcut)return;UpdateFileSearchShortcut();var desired=settings.DockHotkeyEnabled?settings.DockHotkey:"";if(registeredShortcut==desired)return;
+        var handle=new WindowInteropHelper(this).Handle;UnregisterHotKey(handle,0x5144);registeredShortcut=desired;
+        if(desired==""){ShortcutStatus="已关闭";return;}
+        uint mods=desired switch{"Alt+D"=>1u,"Ctrl+Shift+D"=>6u,_=>3u};
+        bool ok=RegisterHotKey(handle,0x5144,mods|0x4000,0x44);ShortcutStatus=ok?"已启用":"快捷键被占用，请更换";
+        ActivityStore.Write("快捷键",message:ShortcutStatus+" · "+desired);
+    }
+    IntPtr ShortcutHook(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam,ref bool handled)
+    {
+        if(message==0x0312&&wParam.ToInt32()==0x5146){handled=true;ShowFileSearch();return IntPtr.Zero;}
+        if(message==0x0312&&wParam.ToInt32()==0x5144){handled=true;if(Coordinator!=null)Coordinator.Toggle();else SetManualHidden(!manuallyHidden&&!IsLayerLowered);ActivityStore.Write("Dock显隐",message:manuallyHidden?"快捷键隐藏":"快捷键显示");}return IntPtr.Zero;
+    }
+    internal void SetManualHidden(bool value){manuallyHidden=value;hideTimer.Stop();previewTimer.Stop();preview?.Close();preview=null;groupFlyout?.Collapse();if(value)Hide();else{hidden=false;if(!IsVisible)Show();RaiseDock();Position();ScheduleHide();}}
+}
+
+
