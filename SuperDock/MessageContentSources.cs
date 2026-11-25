@@ -74,7 +74,7 @@ internal static class MessageContentSources
                 foreach(var notice in result.GroupBy(n=>n.Client).Select(g=>g.First())){
                     if(!settings.MessageRemindersEnabled||!settings.MessageReminderClients.Contains(notice.Client))continue;
                     recentToasts[notice.Client]=Environment.TickCount64;
-                    MessageReminders.UpdateOrDisplay(owner,notice.Client,Details(settings,notice.Client)?notice.Body:notice.Client+" 有新的消息",notice.Source);
+                    MessageReminders.UpdateOrDisplay(owner,settings,notice.Client,Details(settings,notice.Client)?notice.Body:notice.Client+" 有新的消息",notice.Source);
                 }
             }finally{busy=false;if(requested&&!stopped){requested=false;_ = owner.Dispatcher.BeginInvoke(new Action(()=>_ = Poll()),DispatcherPriority.Normal);}}
         }
@@ -86,7 +86,7 @@ internal static class MessageContentSources
             previewBusy=true;try{
                 var rows=await Task.Run(WecomContentReader.ReadChanges);
                 if(!stopped&&settings.MessageRemindersEnabled&&settings.MessageReminderClients.Contains("企业微信")&&Details(settings,"企业微信")&&Environment.TickCount64-Interlocked.Read(ref lastWecomToast)>8000)
-                    foreach(var row in rows.TakeLast(1)){recentToasts["企业微信"]=Environment.TickCount64;MessageReminders.UpdateOrDisplay(owner,"企业微信",row.Text,row.Window);}
+                    foreach(var row in rows.TakeLast(1)){recentToasts["企业微信"]=Environment.TickCount64;MessageReminders.UpdateOrDisplay(owner,settings,"企业微信",row.Text,row.Window);}
             }finally{previewBusy=false;}
         };
         owner.Closed+=(_,_)=>{stopped=true;timer.Stop();previewTimer.Stop();if(subscribed!=null)try{subscribed.NotificationChanged-=Changed;}catch{}};

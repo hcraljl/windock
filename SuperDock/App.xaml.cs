@@ -20,6 +20,9 @@ public partial class App : Application
             // Updates are manual-only: the dock starts immediately and never phones home on launch.
             var settings=SuperDock.MainWindow.ReadSettings();Theme.Apply(settings.ThemeMode);_=Task.Run(Branding.RefreshShortcuts);
             coordinator=new DockCoordinator(settings);MainWindow=coordinator.Primary;coordinator.Start();ActivityStore.Write("启动完成",message:$"windock {typeof(App).Assembly.GetName().Version!.ToString(3)} · {coordinator.Docks.Count} 个显示器");
+            // 更新流程（源始终是 GitHub Releases）：启动自动更新（可跳过）+ 运行中仅提醒。
+            UpdatePrompt.BeginStartupCheck(coordinator.Primary,settings);
+            UpdatePrompt.BeginRuntimeWatch(coordinator.Primary,settings);
         }catch(Exception ex){ActivityStore.Write("启动失败",message:ex.Message,error:ex);GlassDialog.Show("启动失败："+ex.Message,"windock");Shutdown(1);}
     }
     protected override void OnExit(ExitEventArgs e){coordinator?.Dispose();instance?.Dispose();base.OnExit(e);}

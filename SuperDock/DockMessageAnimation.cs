@@ -7,6 +7,8 @@ public partial class MainWindow
 {
     internal string DockEdge=>settings.Edge;
     internal double MessageReminderOpacity=>settings.MessageReminderOpacity;
+    // 更新提醒气泡锚点：设置图标（无则回落到应用中心图标）。
+    internal FrameworkElement? SettingsAnchor()=>panel.Children.OfType<FrameworkElement>().FirstOrDefault(e=>Equals(e.Tag,"action:settings")||Equals(e.Tag,"action:library"));
     internal FrameworkElement? MessageAnchor(string client)
     {
         bool Matches(Entry entry)=>MessageReminders.Client(RunningWindows.WindowTarget(entry.Target))==client;

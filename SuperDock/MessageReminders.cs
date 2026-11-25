@@ -47,34 +47,47 @@ internal static class MessageReminders
                 // A continuous flash is one unread episode, not one new message per blink.
                 bool repeated=last.TryGetValue(key,out var time)&&now-time<5000;last[key]=now;if(repeated)return;
                 if(MessageContentSources.RecentToast(client))return;
-                Display(window,client,client+" 有新的消息或提醒",source);
+                Display(window,settings,client,client+" 有新的消息或提醒",source);
                 var preview=client=="微信"&&MessageContentSources.Details(settings,client)?await MessageContentSources.WechatPreview(source):null;
-                if(preview!=null&&!MessageContentSources.RecentToast(client)&&!window.IsDockClosed&&settings.MessageRemindersEnabled&&settings.MessageReminderClients.Contains(client))UpdateOrDisplay(window,client,preview,source);
+                if(preview!=null&&!MessageContentSources.RecentToast(client)&&!window.IsDockClosed&&settings.MessageRemindersEnabled&&settings.MessageReminderClients.Contains(client))UpdateOrDisplay(window,settings,client,preview,source);
             }catch(Exception ex)when(ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception){}
             finally{pending.Remove(source);}
         }
     }
-    public static void UpdateOrDisplay(MainWindow owner,string client,string title,IntPtr source)
+    // 预览时长由设置驱动：1-5 秒自动收起，0 = 一直显示直到用户点击查看。
+    public static string Describe(MainWindow.Settings settings)=>settings.MessagePreviewSeconds<=0?"一直显示":settings.MessagePreviewSeconds+" 秒";
+    static void ArmDismiss(MainWindow.Settings settings,Window popup)
+    {
+        dismiss?.Stop();dismiss=null;
+        if(settings.MessagePreviewSeconds<=0)return;
+        var timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(Math.Max(300,settings.MessagePreviewSeconds*1000-160))};
+        timer.Tick+=(_,_)=>{timer.Stop();var fade=new System.Windows.Media.Animation.DoubleAnimation(0,TimeSpan.FromMilliseconds(160));fade.Completed+=(_,_)=>{if(popup.IsVisible)popup.Close();};popup.BeginAnimation(UIElement.OpacityProperty,fade);};
+        dismiss=timer;timer.Start();
+    }
+    public static void UpdateOrDisplay(MainWindow owner,MainWindow.Settings settings,string client,string title,IntPtr source)
     {
         if(toast is {IsVisible:true}&&toastClient==client&&toastSender!=null&&toastBody!=null){
             var lines=title.Split('\n',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
             toastSender.Text=lines.Length>1?lines[0]:client;toastBody.Text=lines.Length>1?string.Join("\n",lines.Skip(1)):title;
-            ((FrameworkElement)toast.Content).BeginAnimation(UIElement.OpacityProperty,null);((FrameworkElement)toast.Content).Opacity=1;toast.UpdateLayout();dismiss?.Stop();dismiss?.Start();return;
+            ((FrameworkElement)toast.Content).BeginAnimation(UIElement.OpacityProperty,null);((FrameworkElement)toast.Content).Opacity=1;toast.UpdateLayout();ArmDismiss(settings,toast);return;
         }
-        Display(owner,client,title,source);
+        Display(owner,settings,client,title,source);
     }
     public static void UpdateOpacity(double opacity)
     {
         if(toast?.Content is Border border&&toastClient!=null)border.Background=MessageGlass.PopupSurface(toastClient,opacity);
-    }    public static void Display(MainWindow owner,string client,string title,IntPtr source)
+    }    public static void Display(MainWindow owner,MainWindow.Settings settings,string client,string title,IntPtr source)
     {
         if(owner.IsDockClosed)return;toast?.Close();if(owner.Coordinator!=null&&DesktopIntegration.Cursor(out var cursor))owner=owner.Coordinator.Docks.FirstOrDefault(d=>d.PhysicalWorkArea.Contains(cursor))??owner;
         var anchor=owner.MessageAnchor(client);if(anchor==null)return;var finish=owner.BeginMessage(anchor);
         var popup=new Window{Title="windock · 消息提醒",Width=320,SizeToContent=SizeToContent.Height,WindowStyle=WindowStyle.None,ResizeMode=ResizeMode.NoResize,ShowInTaskbar=false,ShowActivated=false,Topmost=true,Owner=owner,AllowsTransparency=true,Background=Brushes.Transparent};
         var lines=(title??"").Split('\n',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);string sender=lines.Length>1?lines[0]:client;string message=lines.Length>1?string.Join("\n",lines.Skip(1)):string.IsNullOrWhiteSpace(title)?"有新的消息":title;
         var body=new StackPanel();var header=new DockPanel();var time=new TextBlock{Text=DateTime.Now.ToString("HH:mm"),FontSize=10,Foreground=Theme.Muted,VerticalAlignment=VerticalAlignment.Center};DockPanel.SetDock(time,Dock.Right);header.Children.Add(time);header.Children.Add(new Image{Source=NotificationLogo.Create(client),Width=22,Height=22,Margin=new Thickness(0,0,8,0)});toastSender=new TextBlock{Text=sender,FontSize=13,FontWeight=FontWeights.SemiBold,Foreground=Theme.Text,TextTrimming=TextTrimming.CharacterEllipsis,VerticalAlignment=VerticalAlignment.Center};header.Children.Add(toastSender);body.Children.Add(header);
-        toastBody=new TextBlock{Text=message,FontSize=13,Foreground=Theme.Text,Opacity=.86,TextWrapping=TextWrapping.Wrap,MaxHeight=70,Margin=new Thickness(0,8,0,0)};body.Children.Add(toastBody);
+        // 来源与内容一目了然：昵称/群聊名在标题行，"来自 客户端"补充来源，正文展示消息内容。
+        body.Children.Add(new TextBlock{Text="来自 "+client,FontSize=10.5,Foreground=Theme.Muted,Margin=new Thickness(0,3,0,0)});
+        toastBody=new TextBlock{Text=message,FontSize=13,Foreground=Theme.Text,Opacity=.88,TextWrapping=TextWrapping.Wrap,MaxHeight=96,Margin=new Thickness(0,8,0,0)};body.Children.Add(toastBody);
         GetWindowThreadProcessId(source,out uint originalPid);
+        if(source!=IntPtr.Zero)body.Children.Add(new TextBlock{Text="点击气泡查看会话",FontSize=10.5,Foreground=Theme.Muted,Opacity=.8,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,9,0,0)});
         popup.MouseLeftButtonUp+=(_,_)=>{GetWindowThreadProcessId(source,out uint pid);if(source!=IntPtr.Zero&&pid==originalPid){ShowWindow(source,9);SetForegroundWindow(source);}popup.Close();};
         popup.Content=new Border{CornerRadius=new CornerRadius(16),Background=MessageGlass.PopupSurface(client,owner.MessageReminderOpacity),BorderBrush=MessageGlass.Rim,BorderThickness=new Thickness(.7),Padding=new Thickness(16,13,16,14),Child=body,Cursor=source!=IntPtr.Zero?System.Windows.Input.Cursors.Hand:System.Windows.Input.Cursors.Arrow};
         void Position(){if(!anchor.IsVisible){popup.Close();return;}var a=anchor.PointToScreen(new Point());var b=anchor.PointToScreen(new Point(anchor.ActualWidth,anchor.ActualHeight));var dpi=VisualTreeHelper.GetDpi(popup);double w=popup.ActualWidth*dpi.DpiScaleX,h=popup.ActualHeight*dpi.DpiScaleY;double x=(a.X+b.X-w)/2,y=a.Y-h-12;
@@ -83,6 +96,7 @@ internal static class MessageReminders
         }
         EventHandler moved=(_,_)=>Position();SizeChangedEventHandler resized=(_,_)=>Position();owner.LocationChanged+=moved;owner.SizeChanged+=resized;
         popup.Loaded+=(_,_)=>{Position();((FrameworkElement)popup.Content).BeginAnimation(UIElement.OpacityProperty,new System.Windows.Media.Animation.DoubleAnimation(0,1,TimeSpan.FromMilliseconds(90)));};popup.DpiChanged+=(_,_)=>popup.Dispatcher.BeginInvoke(new Action(Position));
-        toast=popup;toastClient=client;var timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(2840)};timer.Tick+=(_,_)=>{timer.Stop();var fade=new System.Windows.Media.Animation.DoubleAnimation(0,TimeSpan.FromMilliseconds(160));fade.Completed+=(_,_)=>{if(popup.IsVisible)popup.Close();};((FrameworkElement)popup.Content).BeginAnimation(UIElement.OpacityProperty,fade);};popup.Closed+=(_,_)=>{timer.Stop();owner.LocationChanged-=moved;owner.SizeChanged-=resized;finish();if(ReferenceEquals(toast,popup))toast=null;};dismiss=timer;popup.Show();timer.Start();
+        toast=popup;toastClient=client;popup.Closed+=(_,_)=>{dismiss?.Stop();dismiss=null;owner.LocationChanged-=moved;owner.SizeChanged-=resized;finish();if(ReferenceEquals(toast,popup))toast=null;};
+        ArmDismiss(settings,popup);popup.Show();
     }
 }

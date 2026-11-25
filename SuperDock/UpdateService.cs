@@ -76,6 +76,25 @@ internal static class UpdateService
         Status=newer?"":"已是最新版本";
         return newer?release:null;
     }
+    // 轻量检查（仅网页重定向，无 API 限额）：返回新版本的展示号，无更新/失败返回 null。
+    // 供运行中 Dock 的周期提示使用，不改动 Status、不写日志（由调用方决定）。
+    public static async Task<string?> QuietCheck()
+    {
+        try
+        {
+            using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var response=await client.GetAsync($"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/latest",HttpCompletionOption.ResponseHeadersRead,timeout.Token);
+            var final=response.RequestMessage?.RequestUri?.ToString()??"";
+            const string marker="/releases/tag/";
+            int at=final.IndexOf(marker,StringComparison.Ordinal);
+            if(at<0)return null;
+            var tag=Uri.UnescapeDataString(final[(at+marker.Length)..]).TrimEnd('/');
+            if(!System.Version.TryParse(tag.TrimStart('v','V'),out var version))return null;
+            var current=typeof(UpdateService).Assembly.GetName().Version??new Version(0,0,0);
+            return version>current?version.ToString(3):null;
+        }
+        catch(Exception ex) when(ex is HttpRequestException or TaskCanceledException or System.Net.Sockets.SocketException){return null;}
+    }
     // 无 API 限额的兜底：releases/latest 的最终 URL 就是 /tag/<版本>。
     static async Task<UpdateRelease?> CheckViaRedirect()
     {
@@ -98,20 +117,21 @@ internal static class UpdateService
         }
         catch(Exception ex) when(ex is HttpRequestException or TaskCanceledException or InvalidDataException or System.Net.Sockets.SocketException){Status=Status.StartsWith("发现新版本")?Status:"检查失败，请稍后重试";return null;}
     }
-    public static async Task<string> Download(UpdateRelease release,IProgress<int> progress)
+    public static async Task<string> Download(UpdateRelease release,IProgress<int> progress,CancellationToken cancel=default)
     {
         var folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SuperDock","updates");Directory.CreateDirectory(folder);
         var temp=Path.Combine(folder,Guid.NewGuid()+".partial");
         var destination=Path.Combine(folder,"windock-Setup-"+release.Version+".exe");
         try
         {
-            using var response=await client.GetAsync(release.Url,HttpCompletionOption.ResponseHeadersRead);response.EnsureSuccessStatusCode();
-            await using(var input=await response.Content.ReadAsStreamAsync())await using(var output=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))
+            using var response=await client.GetAsync(release.Url,HttpCompletionOption.ResponseHeadersRead,cancel);response.EnsureSuccessStatusCode();
+            await using(var input=await response.Content.ReadAsStreamAsync(cancel))await using(var output=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))
             {
                 var buffer=new byte[81920];long total=0;int read;
-                while((read=await input.ReadAsync(buffer))>0){total+=read;if(total>release.Size)throw new InvalidDataException("安装包大小不符");await output.WriteAsync(buffer.AsMemory(0,read));progress.Report((int)(total*100/release.Size));}
+                while((read=await input.ReadAsync(buffer,cancel))>0){total+=read;if(total>release.Size)throw new InvalidDataException("安装包大小不符");await output.WriteAsync(buffer.AsMemory(0,read),cancel);progress.Report((int)(total*100/release.Size));}
                 if(total!=release.Size)throw new InvalidDataException("下载不完整");
             }
+            cancel.ThrowIfCancellationRequested();
             // 完整性：发布说明带 sha256 时强制校验；否则校验 PE 头与大小。
             if(release.Sha256.Length==64)
             {
@@ -132,7 +152,8 @@ internal static class UpdateService
     }
     public static void Install(string path)
     {
-        Process.Start(new ProcessStartInfo(path){UseShellExecute=true,Arguments="/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS",WorkingDirectory=Path.GetDirectoryName(path)!});
+        // /RESTARTAPPLICATIONS：安装器关闭并重启被关闭的 Dock，静默更新后无需手动打开。
+        Process.Start(new ProcessStartInfo(path){UseShellExecute=true,Arguments="/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS",WorkingDirectory=Path.GetDirectoryName(path)!});
         System.Windows.Application.Current.Shutdown();
     }
 }

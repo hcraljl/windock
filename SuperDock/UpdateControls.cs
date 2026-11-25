@@ -4,7 +4,8 @@ internal sealed partial class AppearanceWindow
 {
     void UpdateControls()
     {
-        Heading("软件更新");content.Children.Add(Text("windock 不会自动下载或更新。点击下方按钮手动检查新版本，确认后才会下载安装。",12));
+        Heading("软件更新");content.Children.Add(Text("更新源始终是 GitHub Releases。打开 dock 时发现新版本会自动下载并安装（可点“跳过更新并进入”）；dock 运行中发布的新版本只提醒、不自动下载；也可以在这里手动检查。",12));
+        Toggle("启动时自动更新","打开 dock 时自动下载并安装新版本；更新窗口中可随时跳过",settings.AutomaticUpdates,v=>settings.AutomaticUpdates=v);
         var status=Text(UpdateService.Status,12);content.Children.Add(status);var button=Button("检查更新",()=>{});button.HorizontalAlignment=HorizontalAlignment.Left;content.Children.Add(button);
         button.Click+=async(_,_)=>
         {
