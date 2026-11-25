@@ -94,7 +94,7 @@ internal static class UpdatePrompt
         {
             try
             {
-                var progress=new Progress<int>(p=>window.Dispatcher.Invoke(()=>status.Text="正在下载 "+p+"%…"));
+                var progress=new Progress<int>(p=>window.Dispatcher.Invoke(()=>status.Text=p<0?"正在下载…":"正在下载 "+p+"%…"));
                 var path=await UpdateService.Download(release,progress,cancel.Token);
                 if(cancel.IsCancellationRequested)return;
                 status.Text="校验通过，正在安装…";installing=true;skip.IsEnabled=false;

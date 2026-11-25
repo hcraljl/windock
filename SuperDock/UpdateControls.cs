@@ -14,7 +14,7 @@ internal sealed partial class AppearanceWindow
             {
                 var release=await UpdateService.Check();if(!IsVisible)return;status.Text=UpdateService.Status;if(release==null)return;
                 if(!GlassDialog.Confirm($"版本 {release.Version}\n{release.Notes}\n\n仅下载有变化的文件，完成后重启。个人配置和日志会保留。","windock 更新","更新并重启"))return;
-                status.Text="正在下载…";var progress=new Progress<int>(p=>status.Text=$"正在下载 {p}%");var path=await UpdateService.Download(release,progress);status.Text="校验通过，正在安装…";UpdateService.Install(path);
+                status.Text="正在下载…";var progress=new Progress<int>(p=>status.Text=p<0?"正在下载…":$"正在下载 {p}%");var path=await UpdateService.Download(release,progress);status.Text="校验通过，正在安装…";UpdateService.Install(path);
             }
             catch(Exception ex){status.Text="更新失败："+ex.Message;}
             finally{button.IsEnabled=true;}

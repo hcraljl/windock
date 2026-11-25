@@ -100,55 +100,111 @@ internal static class UpdateService
     {
         try
         {
-            using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            using var response=await client.GetAsync($"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/latest",HttpCompletionOption.ResponseHeadersRead,timeout.Token);
-            var final=response.RequestMessage?.RequestUri?.ToString()??"";
-            const string marker="/releases/tag/";
-            int at=final.IndexOf(marker,StringComparison.Ordinal);
-            if(response.StatusCode==System.Net.HttpStatusCode.NotFound||at<0){if(Status=="正在检查…")Status="更新源上还没有发布版本";return null;}
-            response.EnsureSuccessStatusCode();
-            var tag=Uri.UnescapeDataString(final[(at+marker.Length)..]).TrimEnd('/');
-            if(!System.Version.TryParse(tag.TrimStart('v','V'),out var version))throw new InvalidDataException($"发布版本号无效：{tag}");
-            var display=version.ToString(3);
-            bool newer=version>typeof(UpdateService).Assembly.GetName().Version!;
-            if(!newer){Status="已是最新版本";return null;}
-            Status="发现新版本 "+display;
-            return new UpdateRelease(display,$"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/windock-Setup-{display}-win-x64.exe","",0,"（网页核对模式：发布说明与校验和不可用，按标准命名安装包下载）",null);
+            // 网络抖动（TLS EOF 等）重试一次。
+            for(int attempt=1;;attempt++)
+            {
+                try
+                {
+                    using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    using var response=await client.GetAsync($"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/latest",HttpCompletionOption.ResponseHeadersRead,timeout.Token);
+                    var final=response.RequestMessage?.RequestUri?.ToString()??"";
+                    const string marker="/releases/tag/";
+                    int at=final.IndexOf(marker,StringComparison.Ordinal);
+                    if(response.StatusCode==System.Net.HttpStatusCode.NotFound||at<0){if(Status=="正在检查…")Status="更新源上还没有发布版本";return null;}
+                    response.EnsureSuccessStatusCode();
+                    var tag=Uri.UnescapeDataString(final[(at+marker.Length)..]).TrimEnd('/');
+                    if(!System.Version.TryParse(tag.TrimStart('v','V'),out var version))throw new InvalidDataException($"发布版本号无效：{tag}");
+                    var display=version.ToString(3);
+                    bool newer=version>typeof(UpdateService).Assembly.GetName().Version!;
+                    if(!newer){Status="已是最新版本";return null;}
+                    Status="发现新版本 "+display;
+                    var url=$"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/windock-Setup-{display}-win-x64.exe";
+                    // 兑底路径拿真实大小：HEAD 附件直链读取 Content-Length（不走 API 限额）。
+                    long size=0;
+                    try
+                    {
+                        using var head=new HttpRequestMessage(HttpMethod.Head,url);
+                        using var probe=await client.SendAsync(head,HttpCompletionOption.ResponseHeadersRead,timeout.Token);
+                        size=probe.Content.Headers.ContentLength??0;
+                    }
+                    catch{/* 取不到大小时下载器自动容错 */}
+                    return new UpdateRelease(display,url,"",size,"（网页核对模式：发布说明与校验和不可用，按标准命名安装包下载）",null);
+                }
+                catch(Exception ex)when(attempt<2&&ex is HttpRequestException or IOException or System.Net.Sockets.SocketException)
+                {
+                    await Task.Delay(900);
+                }
+            }
         }
         catch(Exception ex) when(ex is HttpRequestException or TaskCanceledException or InvalidDataException or System.Net.Sockets.SocketException){Status=Status.StartsWith("发现新版本")?Status:"检查失败，请稍后重试";return null;}
     }
+    // 下载：最多 3 次尝试，中断后断点续传；校验失败/大小不符时清缓存重下。
+    // 未知大小（兜底路径 HEAD 取不到时）跳过大小校验，仅验 PE 头。
     public static async Task<string> Download(UpdateRelease release,IProgress<int> progress,CancellationToken cancel=default)
     {
         var folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SuperDock","updates");Directory.CreateDirectory(folder);
-        var temp=Path.Combine(folder,Guid.NewGuid()+".partial");
+        var temp=Path.Combine(folder,"windock-Setup-"+release.Version+".partial");
         var destination=Path.Combine(folder,"windock-Setup-"+release.Version+".exe");
-        try
+        Exception? last=null;
+        for(int attempt=1;;attempt++)
         {
-            using var response=await client.GetAsync(release.Url,HttpCompletionOption.ResponseHeadersRead,cancel);response.EnsureSuccessStatusCode();
-            await using(var input=await response.Content.ReadAsStreamAsync(cancel))await using(var output=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))
+            try{return await DownloadAttempt(release,temp,destination,progress,cancel);}
+            catch(OperationCanceledException){throw;}
+            catch(Exception ex)when(ex is HttpRequestException or IOException or System.Net.Sockets.SocketException or InvalidDataException or CryptographicException)
             {
-                var buffer=new byte[81920];long total=0;int read;
-                while((read=await input.ReadAsync(buffer,cancel))>0){total+=read;if(total>release.Size)throw new InvalidDataException("安装包大小不符");await output.WriteAsync(buffer.AsMemory(0,read),cancel);progress.Report((int)(total*100/release.Size));}
-                if(total!=release.Size)throw new InvalidDataException("下载不完整");
+                last=ex;
+                // 缓存不可信（校验失败/服务端多发了数据）：清掉重下；不完整则保留断点。
+                bool corrupted=ex is CryptographicException||(ex is InvalidDataException i&&i.Message=="安装包大小不符");
+                if(corrupted&&File.Exists(temp))File.Delete(temp);
+                ActivityStore.Write("更新下载",message:$"第 {attempt} 次下载中断（{ex.Message}），{(corrupted?"重新下载":"断点续传")}");
+                if(attempt>=3)break;
+                await Task.Delay(TimeSpan.FromSeconds(attempt),cancel);
             }
-            cancel.ThrowIfCancellationRequested();
-            // 完整性：发布说明带 sha256 时强制校验；否则校验 PE 头与大小。
+        }
+        if(File.Exists(temp))File.Delete(temp);
+        throw last!;
+    }
+    static async Task<string> DownloadAttempt(UpdateRelease release,string temp,string destination,IProgress<int> progress,CancellationToken cancel)
+    {
+        long existing=File.Exists(temp)?new FileInfo(temp).Length:0;
+        if(release.Size>0&&existing>=release.Size)existing=0;
+        bool resume=existing>0;
+        // 非续传的尝试一律从干净文件开始，避免与残留临时文件冲突。
+        if(!resume&&File.Exists(temp))File.Delete(temp);
+        using var request=new HttpRequestMessage(HttpMethod.Get,release.Url);
+        if(resume)request.Headers.Range=new System.Net.Http.Headers.RangeHeaderValue(existing,null);
+        using var response=await client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,cancel);response.EnsureSuccessStatusCode();
+        if(resume&&response.StatusCode!=System.Net.HttpStatusCode.PartialContent){resume=false;existing=0;if(File.Exists(temp))File.Delete(temp);}
+        long total=resume?existing:0;
+        await using(var input=await response.Content.ReadAsStreamAsync(cancel))await using(var output=new FileStream(temp,resume?FileMode.Append:FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))
+        {
+            var buffer=new byte[81920];int read;
+            while((read=await input.ReadAsync(buffer,cancel))>0)
+            {
+                total+=read;
+                if(release.Size>0&&total>release.Size)throw new InvalidDataException("安装包大小不符");
+                await output.WriteAsync(buffer.AsMemory(0,read),cancel);
+                progress.Report(release.Size>0?(int)(total*100/release.Size):-1);
+            }
+        }
+        if(release.Size>0&&total!=release.Size)throw new InvalidDataException("下载不完整");
+        cancel.ThrowIfCancellationRequested();
+        // 完整性：发布说明带 sha256 时强制校验；否则校验 PE 头（HTTPS 保障传输完整性）。
+        using(var data=File.OpenRead(temp))
+        {
             if(release.Sha256.Length==64)
             {
-                using var data=File.OpenRead(temp);
                 if(!Convert.ToHexString(SHA256.HashData(data)).Equals(release.Sha256,StringComparison.OrdinalIgnoreCase))throw new CryptographicException("安装包校验失败");
             }
             else
             {
-                using var data=File.OpenRead(temp);
                 Span<byte> header=stackalloc byte[2];data.ReadExactly(header);
                 if(header[0]!='M'||header[1]!='Z')throw new InvalidDataException("安装包格式无效");
             }
-            File.Move(temp,destination,true);
-            ActivityStore.Write("更新下载",message:"校验通过 "+release.Version);
-            return destination;
         }
-        catch(Exception ex){if(File.Exists(temp))File.Delete(temp);ActivityStore.Write("更新失败",message:ex.Message,error:ex);throw;}
+        File.Move(temp,destination,true);
+        ActivityStore.Write("更新下载",message:"校验通过 "+release.Version);
+        return destination;
     }
     public static void Install(string path)
     {
