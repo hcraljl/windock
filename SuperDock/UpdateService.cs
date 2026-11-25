@@ -71,7 +71,8 @@ internal static class UpdateService
         response.EnsureSuccessStatusCode();
         var json=await response.Content.ReadAsStringAsync(timeout.Token);
         var release=Parse(json);
-        bool newer=System.Version.Parse(release.Version)>(typeof(UpdateService).Assembly.GetName().Version??new Version(0,0,0));
+        var current=typeof(UpdateService).Assembly.GetName().Version??new Version(0,0,0);
+        bool newer=System.Version.Parse(release.Version)>current;
         Status=newer?"":"已是最新版本";
         return newer?release:null;
     }

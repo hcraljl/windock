@@ -173,7 +173,7 @@ public partial class MainWindow : Window
         DpiChanged+=(_,_)=>Dispatcher.BeginInvoke(new Action(Position));
         SizeChanged += (_, _) => Position();
         SystemParameters.StaticPropertyChanged += DisplayChanged;
-        Closed += (_, _) => { closed = true;if(entryRefreshPending){entryRefreshPending=false;Save();}UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5144);UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5146);shimmerTimer.Stop();shimmer.BeginAnimation(OpacityProperty,null); runningTimer.Stop(); foregroundTimer.Stop(); hideTimer.Stop(); previewTimer.Stop(); closeTimer.Stop(); preview?.Close(); CompositionTarget.Rendering -= MagnifyFrame; magnifying=false; magnifyValues.Clear(); magnifySpeeds.Clear(); SystemParameters.StaticPropertyChanged -= DisplayChanged; };
+        Closed += (_, _) => { closed = true;if(entryRefreshPending){entryRefreshPending=false;Save();}UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5144);UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5146);shimmerTimer.Stop();shimmer.BeginAnimation(OpacityProperty,null); runningTimer.Stop(); foregroundTimer.Stop(); hideTimer.Stop(); previewTimer.Stop(); closeTimer.Stop(); preview?.Close(); CompositionTarget.Rendering -= MagnifyFrame;CompositionTarget.Rendering -= ReorderFrame;reorderItem=null;magnifying=false; magnifyValues.Clear(); magnifySpeeds.Clear(); SystemParameters.StaticPropertyChanged -= DisplayChanged; };
         Render();
     }
     static string SettingsPath()=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SuperDock","settings.json");
@@ -262,7 +262,7 @@ public partial class MainWindow : Window
         FixNames(settings.Entries);
         foreach (var group in settings.Groups) if (group.Entries != null) FixNames(group.Entries);
         settings.DockHeight = Valid(settings.DockHeight,48,120,68);
-        settings.GlassOpacity = Valid(settings.GlassOpacity,.15,1,.8);
+        settings.GlassOpacity = Valid(settings.GlassOpacity,0,1,.8);
         settings.IconSize = Valid(settings.IconSize,24,64,36);
         settings.IconSpacing = Valid(settings.IconSpacing,0,16,5);
         settings.HoverScale = Valid(settings.HoverScale,1,2.5,1.9);
@@ -363,8 +363,9 @@ public partial class MainWindow : Window
     {
         if (!settings.DockDraggable || openMenus > 0 || draggingEntry != null || appearanceWindow != null || addApplicationsWindow != null || preview != null) return;
         if (e.ChangedButton != MouseButton.Left) return;
-        // Ctrl keeps the per-icon reorder, so dragging an icon with Ctrl still rearranges entries.
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
+        // Icons own the pointer: dragging one reorders entries (AttachItemDrag). Only the blank
+        // glass area starts a dock drag, so the two gestures can no longer collide.
+        if (OnButton(e.OriginalSource as DependencyObject)) return;
         if (!DesktopIntegration.Cursor(out var cursor)) return;
         dockCandidate = true; dockDragging = false;
         dockPress = cursor; dockOrigin = settings.DockOffset; dockLiftOrigin = settings.DockLift;
@@ -754,10 +755,14 @@ public partial class MainWindow : Window
         };
     }
     string? draggingKey;
+    Button? reorderItem;
     void ApplyDockOrder()
     {
         var items=panel.Children.OfType<FrameworkElement>().OrderBy(item=>{int i=settings.DockOrder.IndexOf(item.Tag as string??"");return i<0?int.MaxValue:i;}).ToArray();panel.Children.Clear();foreach(var item in items){panel.Children.Add(item);AttachItemDrag(item);}
     }
+    // Dragging an icon reorders it with a live swap: a frame loop polls the primary button and
+    // the cursor (the same proven pattern as DockDragFrame), slides the icon across neighbours and
+    // persists the new visual order on release. OLE DoDragDrop is unreliable on layered windows.
     void AttachItemDrag(FrameworkElement item)
     {
         Point start=default;bool down=false;
@@ -765,11 +770,52 @@ public partial class MainWindow : Window
         item.PreviewMouseMove+=(_,e)=>
         {
             if(!down||e.LeftButton!=MouseButtonState.Pressed||draggingKey!=null||item is Button button&&longPressed.Contains(button))return;
-            var point=e.GetPosition(panel);if(Math.Abs(point.X-start.X)<SystemParameters.MinimumHorizontalDragDistance&&Math.Abs(point.Y-start.Y)<SystemParameters.MinimumVerticalDragDistance)return;
-            down=false;draggingKey=item.Tag as string;if(draggingKey==null)return;draggingEntry=new Entry("","");previewTimer.Stop();preview?.Close();preview=null;item.Opacity=.45;hideTimer.Stop();
-            try{DragDrop.DoDragDrop(item,new DataObject("SuperDock.AllItems",draggingKey),DragDropEffects.Move);}
-            finally{item.Opacity=1;draggingKey=null;Dispatcher.BeginInvoke(DispatcherPriority.Input,new Action(()=>{draggingEntry=null;ScheduleHide();}));}e.Handled=true;
+            var point=e.GetPosition(panel);
+            if(Math.Abs(point.X-start.X)<SystemParameters.MinimumHorizontalDragDistance&&Math.Abs(point.Y-start.Y)<SystemParameters.MinimumVerticalDragDistance)return;
+            down=false;
+            if(item.Tag is not string tag)return;
+            StartReorder(item,tag);e.Handled=true;
         };
+    }
+    void StartReorder(FrameworkElement item,string tag)
+    {
+        draggingKey=tag;reorderItem=item as Button;
+        draggingEntry=new Entry("","");previewTimer.Stop();preview?.Close();preview=null;hideTimer.Stop();
+        if(reorderItem!=null){reorderItem.Opacity=.45;reorderItem.Cursor=Cursors.Hand;}
+        CompositionTarget.Rendering+=ReorderFrame;
+    }
+    void ReorderFrame(object? sender,EventArgs e)
+    {
+        if(reorderItem==null||!DesktopIntegration.PrimaryButton){EndReorder();return;}
+        if(!DesktopIntegration.Cursor(out var cursor))return;
+        var dpi=VisualTreeHelper.GetDpi(this);
+        Point point;
+        try{point=panel.PointFromScreen(new Point(cursor.X,cursor.Y));}catch{return;}
+        bool vertical=settings.Edge is "Left" or "Right";
+        var items=panel.Children.OfType<FrameworkElement>().Where(i=>i.Tag is string).ToList();
+        var hit=items.FirstOrDefault(i=>{
+            var topleft=i.TranslatePoint(new Point(0,0),panel);
+            return vertical?point.Y>=topleft.Y&&point.Y<topleft.Y+i.ActualHeight:point.X>=topleft.X&&point.X<topleft.X+i.ActualWidth;
+        });
+        if(hit!=null&&!Equals(hit,reorderItem))
+        {
+            var to=panel.Children.IndexOf(hit);
+            panel.Children.Remove(reorderItem);panel.Children.Insert(to,reorderItem);
+            UpdateLayout();
+        }
+    }
+    void EndReorder()
+    {
+        CompositionTarget.Rendering-=ReorderFrame;
+        var item=reorderItem;reorderItem=null;
+        if(item!=null)
+        {
+            item.Opacity=1;item.Cursor=null;
+            var order=panel.Children.OfType<FrameworkElement>().Where(i=>i.Tag is string).Select(i=>(string)i.Tag).ToList();
+            if(!order.SequenceEqual(settings.DockOrder)){settings.DockOrder=order;Save();}
+        }
+        draggingKey=null;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input,new Action(()=>{draggingEntry=null;ScheduleHide();}));
     }
     const string ReorderFormat = "SuperDock.Entry.Reorder";
     void AttachReorder(Button button, Entry entry)
@@ -808,7 +854,6 @@ public partial class MainWindow : Window
     }
     void DockDragOver(object sender, DragEventArgs e)
     {
-        if(e.Data.GetDataPresent("SuperDock.AllItems")){e.Effects=DragDropEffects.Move;e.Handled=true;return;}
         if (draggingEntry != null && e.Data.GetDataPresent(ReorderFormat))
         {
             e.Effects = DragDropEffects.Move;
@@ -821,11 +866,6 @@ public partial class MainWindow : Window
     }
     void DockDrop(object sender, DragEventArgs e)
     {
-        if(e.Data.GetData("SuperDock.AllItems") is string key)
-        {
-            var items=panel.Children.OfType<FrameworkElement>().Where(i=>i.Tag is string).ToList();var moving=items.FirstOrDefault(i=>Equals(i.Tag,key));
-            if(moving!=null){var point=e.GetPosition(panel);bool vertical=settings.Edge is "Left" or "Right";var target=items.FirstOrDefault(i=>{var center=i.TranslatePoint(new Point(i.ActualWidth/2,i.ActualHeight/2),panel);return vertical?point.Y<center.Y:point.X<center.X;});if(target!=moving){items.Remove(moving);int index=target==null?items.Count:items.IndexOf(target);items.Insert(index<0?items.Count:index,moving);settings.DockOrder=items.Select(i=>(string)i.Tag).ToList();Save();Render();}}e.Handled=true;e.Effects=DragDropEffects.Move;return;
-        }
         if (draggingEntry != null && e.Data.GetDataPresent(ReorderFormat))
         {
             int oldIndex = settings.Entries.IndexOf(draggingEntry);
@@ -956,13 +996,16 @@ public partial class MainWindow : Window
         surface.CornerRadius = new CornerRadius(settings.CornerRadius);RoundClip.SetRadius(surface,settings.CornerRadius);
         surface.Cursor=settings.DockDraggable?Cursors.SizeAll:null;
         var fill = new LinearGradientBrush { StartPoint = new Point(0,0), EndPoint = new Point(1,1) };
-        byte alpha = (byte)(settings.GlassOpacity * 255);
+        // A floor of 1/255 keeps the surface hit-testable (layered windows drop clicks on fully
+        // transparent pixels) while staying visually fully transparent at 0%.
+        byte alpha = Math.Max((byte)1, (byte)(settings.GlassOpacity * 255));
         fill.GradientStops.Add(new GradientStop(Color.FromArgb(alpha,67,80,105),0));
         fill.GradientStops.Add(new GradientStop(Color.FromArgb(alpha,28,37,52),.55));
         fill.GradientStops.Add(new GradientStop(Color.FromArgb(alpha,46,61,82),1));
         surface.Background = fill;
         if(IsLoaded){DesktopIntegration.Blur(this,false);Dispatcher.BeginInvoke(new Action(PlayShimmer));}
-        surface.BorderBrush = (Brush)FindResource("GlassStroke");
+        // At 0% opacity the whole glass disappears: only the icons remain visible.
+        surface.BorderBrush = alpha <= 1 ? null : (Brush)FindResource("GlassStroke");
     }
     // Snapshot the icon row by rendering its container and cropping the row rect: rendering the
     // row itself yields an empty bitmap (layout offset). The mirror is then flipped and cut to the
