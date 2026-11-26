@@ -18,15 +18,16 @@ internal static class AnnotationToolbar
         var row=new StackPanel{Orientation=Orientation.Vertical,Tag=owner};
         var tools=new StackPanel{Orientation=Orientation.Horizontal};
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(8,2,0,0),Tag="actions"};
-        void ToolButton(string glyph,string tip,AnnotationLayer.Tool tool)
+        void ToolButton(string glyph,string tip,AnnotationLayer.Tool tool,bool ellipse=false)
         {
-            var button=Small(glyph,tip,()=>{layer.Current=layer.Current==tool?AnnotationLayer.Tool.None:tool;Refresh();});
+            var button=Small(glyph,tip,()=>{layer.Current=layer.Current==tool?AnnotationLayer.Tool.None:tool;Refresh();},ellipse);
             button.Tag=tool;tools.Children.Add(button);
         }
         ToolButton("\uE70F","涂鸦",AnnotationLayer.Tool.Pen);
         ToolButton("\uE8A5","矩形",AnnotationLayer.Tool.Rect);
-        ToolButton("\uE91D","椭圆",AnnotationLayer.Tool.Ellipse);
+        ToolButton("\uE91D","椭圆",AnnotationLayer.Tool.Ellipse,ellipse:true);
         ToolButton("\uE72A","箭头",AnnotationLayer.Tool.Arrow);
+        ToolButton("\uE72E","马赛克",AnnotationLayer.Tool.Mosaic);
         ToolButton("\uE70B","文字",AnnotationLayer.Tool.Text);
         var undo=Small("\uE7A7","撤销",()=>layer.Undo());undo.Tag="undo";tools.Children.Add(undo);
         var clear=Small("\uE74D","清空标注",()=>layer.ClearAll());clear.Tag="clear";tools.Children.Add(clear);
@@ -73,11 +74,14 @@ internal static class AnnotationToolbar
         layer.Changed+=Refresh;layer.ColorChanged+=Refresh;row.Tag=Refresh;Refresh();
         return row;
     }
-    static Button Small(string glyph,string tip,Action action)
+    static Button Small(string glyph,string tip,Action action,bool ellipseIcon=false)
     {
+        object content=ellipseIcon
+            ?new System.Windows.Shapes.Ellipse{Width=13,Height=13,Stroke=new SolidColorBrush(Color.FromRgb(238,242,248)){Opacity=.92},StrokeThickness=1.7,Fill=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center}
+            :(object)new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=14,Foreground=Theme.Text};
         var button=new Button
         {
-            Content=new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=14,Foreground=Theme.Text},
+            Content=content,
             Style=(Style)Application.Current.FindResource("GlassButton"),Width=32,Height=28,Padding=new Thickness(0),ToolTip=tip,Cursor=Cursors.Hand,Margin=new Thickness(2,0,2,0),HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center,Background=GlassWindow.Surface
         };
         button.Click+=(_,_)=>action();

@@ -69,6 +69,11 @@ public partial class MainWindow : Window
         public string ScreenshotHotkey { get; set; } = "F1";
         public bool PinHotkeyEnabled { get; set; } = true;
         public string PinHotkey { get; set; } = "F3";
+        // Alt+F 翻译：框选屏幕文字后识别并中英互译（优先本机 Umi-OCR 接口）。
+        public bool TranslateHotkeyEnabled { get; set; } = true;
+        public string TranslateHotkey { get; set; } = "Alt+F";
+        // 本机 Umi-OCR HTTP 接口地址（参考 Umi-OCR 的默认端口）。
+        public string OcrApiUrl { get; set; } = "http://127.0.0.1:1224";
         // 今日待办：未来一周内的待办事项与提醒时间；到点弹窗提醒未完成事项。
         public List<TodoItem> Todos { get; set; } = [];
         public string WeatherCity { get; set; } = "";
@@ -296,9 +301,9 @@ public partial class MainWindow : Window
         settings.ScreenshotHotkey = NormalizeFnKey(settings.ScreenshotHotkey, "F1");
         settings.PinHotkey = NormalizeFnKey(settings.PinHotkey, "F3");
         if (settings.ScreenshotHotkey == settings.PinHotkey) settings.PinHotkey = "F3"; // 双键同键时保留截图键，贴图回落默认
+        settings.TranslateHotkey = (settings.TranslateHotkey ?? "").Trim() switch { "Ctrl+Shift+F" => "Ctrl+Shift+F", "Alt+F" => "Alt+F", _ => "Alt+F" };
+        settings.OcrApiUrl = string.IsNullOrWhiteSpace(settings.OcrApiUrl) ? "http://127.0.0.1:1224" : settings.OcrApiUrl.Trim();
         settings.Todos ??= [];
-        // 1.7.1 起移除翻译功能：清理旧配置里遗留的翻译快捷键字段
-        settings.ExtraData?.Remove("TranslateHotkeyEnabled");settings.ExtraData?.Remove("TranslateHotkey");
         settings.Todos.RemoveAll(item => item == null || string.IsNullOrWhiteSpace(item.Text));
         foreach (var todo in settings.Todos) if (todo.RemindAt.Kind == DateTimeKind.Unspecified) todo.RemindAt = DateTime.SpecifyKind(todo.RemindAt, DateTimeKind.Local);
         settings.DockOffset = double.IsFinite(settings.DockOffset) ? settings.DockOffset : 0;

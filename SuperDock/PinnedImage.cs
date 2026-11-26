@@ -22,6 +22,11 @@ sealed class PinnedImage : Window
         image=new Image{Source=source,Stretch=Stretch.Fill};RenderOptions.SetBitmapScalingMode(image,BitmapScalingMode.HighQuality);
         var frame=new Border{CornerRadius=new CornerRadius(6),Child=image,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=18,ShadowDepth=4,Opacity=.45,Color=Color.FromRgb(12,18,28)}};
         layer.Visibility=Visibility.Hidden;
+        layer.MosaicProvider=rect=>{
+            var source=(BitmapSource)image.Source;
+            double k=source.PixelWidth/Math.Max(1,image.ActualWidth);
+            return AnnotationLayer.Pixelate(source,new Rect(rect.X*k,rect.Y*k,rect.Width*k,rect.Height*k));
+        };
         root.Children.Add(frame);root.Children.Add(layer);
         Content=root;
         SizeToContent=SizeToContent.WidthAndHeight;

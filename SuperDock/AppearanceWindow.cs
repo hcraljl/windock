@@ -265,6 +265,22 @@ internal sealed partial class AppearanceWindow : Window
         var pinKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"F1","F2","F3","F4"}){var option=Button(key,()=>{settings.PinHotkey=key;changed();Navigate(page);});option.Background=settings.PinHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);pinKeys.Children.Add(option);}content.Children.Add(pinKeys);
         content.Children.Add(Text(MainWindow.PinShortcutStatus,11));
         content.Children.Add(Text("截图进行中按贴图键可直接钉住当前选区；若两个快捷键相同，贴图会为截图让位并在上方提示。",11));
+        Heading("翻译快捷键");
+        Toggle("翻译快捷键","框选屏幕文字，自动识别并中英互译（中文译为英文，英文译为中文）",settings.TranslateHotkeyEnabled,v=>settings.TranslateHotkeyEnabled=v);
+        var translateKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"Alt+F","Ctrl+Shift+F"}){var option=Button(key,()=>{settings.TranslateHotkey=key;changed();Navigate(page);});option.Background=settings.TranslateHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);translateKeys.Children.Add(option);}content.Children.Add(translateKeys);
+        content.Children.Add(Text(MainWindow.TranslateShortcutStatus,11));
+        // Umi-OCR 本机接口（参考 Umi-OCR 默认 http://127.0.0.1:1224）：识别与翻译优先走它，离线可用。
+        var apiRow=new Grid{Margin=new Thickness(0,4,0,0)};
+        apiRow.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        apiRow.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        apiRow.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        apiRow.Children.Add(new TextBlock{Text="Umi-OCR 接口",FontSize=12.5,Foreground=Theme.Muted,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0)});
+        var apiInput=new TextBox{Height=32,FontSize=12,Padding=new Thickness(8,2,8,2),VerticalContentAlignment=VerticalAlignment.Center,Text=settings.OcrApiUrl,ToolTip="本机 Umi-OCR 的 HTTP 接口地址，默认 http://127.0.0.1:1224"};
+        Grid.SetColumn(apiInput,1);apiRow.Children.Add(apiInput);
+        var apiSave=Button("保存",()=>{var value=apiInput.Text.Trim();settings.OcrApiUrl=string.IsNullOrWhiteSpace(value)?"http://127.0.0.1:1224":value;changed();Navigate(page);});
+        apiSave.MinWidth=64;Grid.SetColumn(apiSave,2);apiSave.Margin=new Thickness(8,0,0,0);apiRow.Children.Add(apiSave);
+        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(12,8,10,8),Margin=new Thickness(0,6,0,4),Child=apiRow});
+        content.Children.Add(Text("OCR 与翻译优先使用本机 Umi-OCR（离线可用）；未运行时自动改用系统 OCR 与在线翻译。",11));
     }
     void GeneralPreferences()
     {
