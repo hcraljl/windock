@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -18,6 +19,21 @@ internal static class AnnotationToolbar
     static readonly Brush SelectedBrush=new SolidColorBrush(Color.FromRgb(214,233,255)); // 选中：浅蓝底
     static readonly Brush HoverBrush=new SolidColorBrush(Color.FromArgb(20,0,0,0));
     static readonly Brush LabelFg=new SolidColorBrush(Color.FromRgb(91,107,127));
+    // 判定鼠标事件是否来自工具条弹层（如字号下拉的独立 HWND Popup、右键菜单）：
+    // 弹层内容不在宿主 chrome 的视觉树里，但事件会沿逻辑树冒泡回窗口，
+    // 不识别会把“点下拉选项”误判成“点在选区外”而重置截图/当作拖动。
+    internal static bool FromPopupContent(DependencyObject? source)
+    {
+        while(source!=null)
+        {
+            if(source is ComboBox or ComboBoxItem or Popup or ContextMenu or MenuItem)return true;
+            if(source.GetType().Name is "PopupRoot" or "PopupChildWindow")return true; // 弹层 HWND 根（类型不公开）
+            DependencyObject? next=source is Visual||source is System.Windows.Media.Media3D.Visual3D?VisualTreeHelper.GetParent(source):null;
+            if(next==null)next=LogicalTreeHelper.GetParent(source);
+            source=next;
+        }
+        return false;
+    }
     public static FrameworkElement Build(AnnotationLayer layer,Window owner,Action<Vector> onGripDrag,int undoAfter,params FrameworkElement[] extras)
     {
         var row=new StackPanel{Orientation=Orientation.Vertical};

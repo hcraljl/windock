@@ -15,7 +15,8 @@ sealed class PinnedImage : Window
     readonly Grid root=new();
     readonly AnnotationLayer layer=new();
     Border? toolbar;
-    double scale=1;bool alwaysTop=true;
+    double zoomScale=1,zoomTarget=1;bool zoomAnimating;DateTime zoomLastFrame;double baseImgW=double.NaN,baseImgH=double.NaN;
+    bool alwaysTop=true;
     readonly Rect? at;
     PinnedImage(BitmapSource source,MainWindow.Settings settings,Rect? at=null)
     {
@@ -56,6 +57,7 @@ sealed class PinnedImage : Window
         // 手动拖动（DragMove 在贴图不抢焦点的场景下不稳定）：捕获鼠标，按屏幕偏移移动窗口。
         bool dragging=false;Point dragOffset;
         MouseLeftButtonDown+=(_,e)=>{
+            if(e.OriginalSource is DependencyObject src&&AnnotationToolbar.FromPopupContent(src))return; // 工具条弹层（如字号下拉）：不算拖动/双击
             if(e.ClickCount==2){Close();return;}
             if(e.ButtonState!=MouseButtonState.Pressed)return;
             var p=e.GetPosition(this);var screen=new Point(Left+p.X,Top+p.Y);
@@ -117,19 +119,41 @@ sealed class PinnedImage : Window
         hook=SetWindowsHookEx(14,hookProc,IntPtr.Zero,0); // WH_MOUSE_LL
     }
     static void Unhook(){if(hook!=IntPtr.Zero){UnhookWindowsHookEx(hook);hook=IntPtr.Zero;}}
+    // 平滑缩放：滚轮只更新目标缩放，渲染帧间用指数趋近过渡，消除逐格跳动的顿挫感。
     void Zoom(double factor)
     {
         if(layer.Visibility==Visibility.Visible)layer.CommitTyping();
+        if(double.IsNaN(baseImgW))
+        {
+            baseImgW=image.ActualWidth;baseImgH=image.ActualHeight;
+            if(baseImgW<=0||baseImgH<=0)return;
+        }
         var work=SystemParameters.WorkArea;
-        double cx=Left+ActualWidth/2,cy=Top+ActualHeight/2;
-        double ratio=factor;
-        double width=Math.Max(40,ActualWidth*ratio),height=Math.Max(40,ActualHeight*ratio);
-        if(width>work.Width*1.8||height>work.Height*2.4||width<24||height<24)return;
-        scale*=ratio;
+        double min=Math.Max(24/baseImgW,24/baseImgH);
+        double max=Math.Max(min,Math.Min(work.Width*1.8/baseImgW,work.Height*2.4/baseImgH));
+        double target=Math.Clamp(zoomTarget*factor,min,max);
+        if(target==zoomTarget)return; // 已到目标（含边界钳制）
+        zoomTarget=target;zoomLastFrame=DateTime.UtcNow;
+        if(!zoomAnimating){zoomAnimating=true;CompositionTarget.Rendering+=OnZoomFrame;}
+    }
+    void OnZoomFrame(object? sender,EventArgs e)
+    {
+        if(!IsVisible){zoomAnimating=false;CompositionTarget.Rendering-=OnZoomFrame;return;} // 窗口已关闭
+        var now=DateTime.UtcNow;
+        double dt=Math.Min(.1,Math.Max(.001,(now-zoomLastFrame).TotalSeconds));
+        zoomLastFrame=now;
+        zoomScale+=(zoomTarget-zoomScale)*(1-Math.Exp(-dt*13));
+        if(Math.Abs(zoomTarget-zoomScale)<=zoomTarget*.002)zoomScale=zoomTarget;
+        ApplyZoom();
+        if(zoomScale==zoomTarget){zoomAnimating=false;CompositionTarget.Rendering-=OnZoomFrame;}
+    }
+    void ApplyZoom()
+    {
+        double cx=Left+ActualWidth/2,cy=Top+ActualHeight/2; // 以窗口当前中心为锚点缩放
         SizeToContent=SizeToContent.Manual;
-        image.Width=image.ActualWidth*ratio;image.Height=image.ActualHeight*ratio;
+        image.Width=baseImgW*zoomScale;image.Height=baseImgH*zoomScale;
         layer.Width=image.Width;layer.Height=image.Height;
-        Width=width;Height=height;
+        Width=image.Width;Height=image.Height;
         UpdateLayout();
         Left=cx-ActualWidth/2;Top=cy-ActualHeight/2;
         ClampIntoWork();
@@ -149,7 +173,7 @@ sealed class PinnedImage : Window
             item.Click+=handler;return item;
         }
         menu.Items.Add(Item("标注",(s,_)=>ToggleAnnotate()));
-        menu.Items.Add(Item("复制",(s,_)=>{try{System.Windows.Clipboard.SetImage((BitmapSource)image.Source);}catch(System.Runtime.InteropServices.COMException){}}));
+        menu.Items.Add(Item("复制",(s,_)=>{try{System.Windows.Clipboard.SetImage(Compose());}catch(System.Runtime.InteropServices.COMException){}}));
         menu.Items.Add(Item("保存为 PNG",(s,_)=>SaveImage()));
         menu.Items.Add(Item("窗口置顶",(s,_)=>{alwaysTop=!alwaysTop;Topmost=alwaysTop;},true,true));
         menu.Items.Add(new Separator());
@@ -200,7 +224,7 @@ sealed class PinnedImage : Window
     }
     void SaveImage()
     {
-        var source=(BitmapSource)image.Source;
+        var source=Compose();
         var thread=new System.Threading.Thread(()=>
         {
             try
@@ -219,6 +243,26 @@ sealed class PinnedImage : Window
             }
         });
         thread.SetApartmentState(System.Threading.ApartmentState.STA);thread.IsBackground=true;thread.Start();
+    }
+    // 合成当前显示内容：原图 + 标注层，按图片物理像素输出（复制/保存共用，水印等标注都包含在内）。
+    BitmapSource Compose()
+    {
+        var source=(BitmapSource)image.Source;
+        if(!layer.HasDrawings)return source;
+        double k=source.PixelWidth/Math.Max(1,image.ActualWidth);
+        layer.SuppressOverlay=true; // 选择框不进入成图
+        var rtb=new RenderTargetBitmap(source.PixelWidth,source.PixelHeight,96,96,PixelFormats.Pbgra32);
+        var visual=new DrawingVisual();
+        using(var ctx=visual.RenderOpen())
+        {
+            ctx.DrawImage(source,new Rect(0,0,source.PixelWidth,source.PixelHeight));
+            ctx.PushTransform(new ScaleTransform(k,k));
+            ctx.DrawRectangle(new VisualBrush(layer),null,new Rect(0,0,layer.Width,layer.Height));
+            ctx.Pop();
+        }
+        rtb.Render(visual);rtb.Freeze();
+        layer.SuppressOverlay=false;
+        return rtb;
     }
     internal static void Pin(BitmapSource source,MainWindow.Settings settings,Rect? at=null)
     {

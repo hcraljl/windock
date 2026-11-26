@@ -76,7 +76,8 @@ sealed class CaptureWindow : Window
             dim.Width=Width;dim.Height=Height;};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
         PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}else if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
-        PreviewMouseLeftButtonDown+=(_,e)=>{if(selected&&!InSelection(e.GetPosition(root))&&!OverChrome(e,chrome))BeginSelect(e.GetPosition(root));};
+        // 选区外点击：无标注工具时重新框选；工具激活时忽略（避免误触清空所有标注/重置截图），也不在选区外绘制
+        PreviewMouseLeftButtonDown+=(_,e)=>{var p=e.GetPosition(root);if(selected&&!InSelection(p)&&!OverChrome(e,chrome)){if(layer.Current==AnnotationLayer.Tool.None)BeginSelect(p);e.Handled=true;}};
         // 选区二次调整与整体拖动：靠近边缘/角拖动可拉大拉小；未选标注工具时按住选区内部可整框拖动（默认提供，不单独列按钮）。
         PreviewMouseLeftButtonDown+=(_,e)=>{if(!selected||selecting||OverChrome(e,chrome))return;var p=e.GetPosition(root);
             var edge=EdgeHit(p);
@@ -148,7 +149,9 @@ sealed class CaptureWindow : Window
         if((resizeEdge&ResizeEdge.S)!=0)b=Math.Max(p.Y,r0.Top+8);
         ApplySelectionRect(new Rect(l,t,r-l,b-t));
     }
-    static bool OverChrome(MouseEventArgs e,DependencyObject chrome)=>e.OriginalSource is DependencyObject d&&IsDescendantOf(d,chrome);
+    // 工具条及其弹层（字号下拉等独立 HWND Popup）都视作界面元素：弹层内容不在 chrome 视觉树内，
+    // 但鼠标事件会沿逻辑树冒泡回窗口，不识别会把下拉选项点击误判成“点在选区外”。
+    static bool OverChrome(MouseEventArgs e,DependencyObject chrome)=>e.OriginalSource is DependencyObject d&&(IsDescendantOf(d,chrome)||AnnotationToolbar.FromPopupContent(d));
     static bool IsDescendantOf(DependencyObject node,DependencyObject ancestor){while(node!=null){if(ReferenceEquals(node,ancestor))return true;node=System.Windows.Media.VisualTreeHelper.GetParent(node);}return false;}
     bool InSelection(Point point)=>selection.Contains(point);
     void BeginSelect(Point point)

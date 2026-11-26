@@ -84,18 +84,67 @@ internal sealed class AnnotationLayer : Canvas
         Path p=>p.Data!=null&&!p.Data.Bounds.IsEmpty&&p.Data.Bounds.Width>2&&p.Data.Bounds.Height>2,
         _=>false
     };
+    // 命中判定只认图形边框（描边带）：点内部不算选中，便于在图形内部继续绘制新图元。
     public UIElement? ShapeAt(Point point)
     {
         for(int i=Children.Count-1;i>=0;i--)
         {
             var el=Children[i];
             if(ReferenceEquals(el,overlay)||!Selectable(el))continue;
-            var bounds=BoundsOf(el);
-            if(bounds.IsEmpty)continue;
-            bounds.Inflate(3,3);
-            if(bounds.Contains(point))return el;
+            if(!HitsStroke(el,point))continue;
+            return el;
         }
         return null;
+    }
+    // 容差：描边半宽 + 少量余量，保证贴着边框点击能选中。
+    static double HitTolerance(UIElement el)=>el switch{Shape s=>Math.Max(3.5,s.StrokeThickness*.5+2),_=>4};
+    static bool HitsStroke(UIElement el,Point point)
+    {
+        var bounds=BoundsOf(el);
+        if(bounds.IsEmpty||bounds.Width<=0||bounds.Height<=0)return false;
+        double t=HitTolerance(el);
+        switch(el)
+        {
+            case Rectangle:
+            {
+                var outer=bounds;outer.Inflate(t,t);
+                if(!outer.Contains(point))return false;
+                var inner=bounds;inner.Inflate(-t,-t);
+                return inner.Width<=0||inner.Height<=0||!inner.Contains(point);
+            }
+            case Ellipse:
+            {
+                var outer=bounds;outer.Inflate(t,t);
+                double ox=outer.Left+outer.Width/2,oy=outer.Top+outer.Height/2;
+                double kx=(point.X-ox)/(outer.Width/2),ky=(point.Y-oy)/(outer.Height/2);
+                if(kx*kx+ky*ky>1)return false;
+                double iw=bounds.Width/2-t,ih=bounds.Height/2-t; // 图形太小时整体都算命中
+                if(iw<=0||ih<=0)return true;
+                double cx=bounds.Left+bounds.Width/2,cy=bounds.Top+bounds.Height/2;
+                double dx=(point.X-cx)/iw,dy=(point.Y-cy)/ih;
+                return dx*dx+dy*dy>=1;
+            }
+            case Path arrow when arrow.Tag is Point[] ft&&ft.Length==2: // 箭头：杆 + 两翼任一线段附近
+            {
+                double limit=Math.Max(t,arrow.StrokeThickness*.5+2);
+                var vector=ft[1]-ft[0];double length=Math.Sqrt(vector.X*vector.X+vector.Y*vector.Y);
+                if(length<1)return false;
+                if(DistToSegment(point,ft[0],ft[1])<=limit)return true;
+                var unit=new Point(vector.X/length,vector.Y/length);
+                double head=ArrowHead(arrow);
+                var left=new Point(ft[1].X-(unit.X*.7-unit.Y*.7)*head,ft[1].Y-(unit.Y*.7+unit.X*.7)*head);
+                var right=new Point(ft[1].X-(unit.X*.7+unit.Y*.7)*head,ft[1].Y-(unit.Y*.7-unit.X*.7)*head);
+                return DistToSegment(point,ft[1],left)<=limit||DistToSegment(point,ft[1],right)<=limit;
+            }
+            default:return false;
+        }
+    }
+    static double DistToSegment(Point p,Point a,Point b)
+    {
+        double abx=b.X-a.X,aby=b.Y-a.Y,len2=abx*abx+aby*aby;
+        if(len2<.01)return (p-a).Length;
+        double t2=Math.Clamp(((p.X-a.X)*abx+(p.Y-a.Y)*aby)/len2,0,1);
+        return (p-(new Point(a.X+abx*t2,a.Y+aby*t2))).Length;
     }
     void Select(UIElement el)
     {
@@ -117,7 +166,7 @@ internal sealed class AnnotationLayer : Canvas
         if(SelectedShape==null)return;
         var bounds=BoundsOf(SelectedShape);
         if(bounds.IsEmpty){Deselect();return;}
-        bounds.Inflate(6,6);
+        // 选中框与手柄直接贴在图形边框上，不再向外偏移
         Canvas.SetLeft(shapeBorder,bounds.Left);Canvas.SetTop(shapeBorder,bounds.Top);
         shapeBorder.Width=Math.Max(0,bounds.Width);shapeBorder.Height=Math.Max(0,bounds.Height);
         var points=new[]
@@ -137,7 +186,6 @@ internal sealed class AnnotationLayer : Canvas
     {
         if(SelectedShape==null)return -1;
         var bounds=BoundsOf(SelectedShape);if(bounds.IsEmpty)return -1;
-        bounds.Inflate(6,6);
         var points=new[]
         {
             new Point(bounds.Left,bounds.Top),new Point(bounds.Left+bounds.Width/2,bounds.Top),new Point(bounds.Right,bounds.Top),
