@@ -11,7 +11,17 @@ internal static class MessageContentSources
     static readonly Dictionary<string,long> recentToasts=[];
     public static bool Details(MainWindow.Settings settings,string client)=>settings.MessageDetailOverrides.TryGetValue(client,out var enabled)?enabled:settings.MessagePreviewEnabled;
     public static bool RecentToast(string client)=>recentToasts.TryGetValue(client,out long time)&&Environment.TickCount64-time<4000;
-    public static string? NotificationClient(string identity,string name)=>name.Equals("企业微信",StringComparison.OrdinalIgnoreCase)||name.Equals("WeCom",StringComparison.OrdinalIgnoreCase)||identity.Equals("WXWork",StringComparison.OrdinalIgnoreCase)||identity.Equals("Tencent.WeWork",StringComparison.OrdinalIgnoreCase)||identity.StartsWith("Tencent.WeWork.",StringComparison.OrdinalIgnoreCase)?"企业微信":IsQq(identity,name)?"QQ":name.Equals("微信",StringComparison.OrdinalIgnoreCase)||name.Equals("WeChat",StringComparison.OrdinalIgnoreCase)||name.Equals("Weixin",StringComparison.OrdinalIgnoreCase)||identity.Equals("com.tencent.wechat",StringComparison.OrdinalIgnoreCase)||identity.Equals("Weixin",StringComparison.OrdinalIgnoreCase)?"微信":null;
+    public static string? NotificationClient(string identity,string name)
+    {
+        var id=identity.ToLowerInvariant();
+        // 先按应用显示名精确匹配，再用 AUMID 宽松包含匹配（覆盖钉钉/飞书等代理通知模板）。
+        if(name.Equals("企业微信",StringComparison.OrdinalIgnoreCase)||name.Equals("WeCom",StringComparison.OrdinalIgnoreCase)||id.Contains("wxwork")||id.Contains("wework"))return "企业微信";
+        if(IsQq(identity,name))return "QQ";
+        if(name.Equals("微信",StringComparison.OrdinalIgnoreCase)||name.Equals("WeChat",StringComparison.OrdinalIgnoreCase)||name.Equals("Weixin",StringComparison.OrdinalIgnoreCase)||id.Contains("weixin")||id.Contains("wechat"))return "微信";
+        if(name.Equals("钉钉",StringComparison.OrdinalIgnoreCase)||id.Contains("dingtalk")||id.Contains("rimet"))return "钉钉";
+        if(name.Equals("飞书",StringComparison.OrdinalIgnoreCase)||name.Equals("Lark",StringComparison.OrdinalIgnoreCase)||id.Contains("feishu")||id.Contains("lark"))return "飞书";
+        return null;
+    }
     static readonly HashSet<string> seen=[];
     static bool initialized,busy;
     static long lastWecomToast;
@@ -56,8 +66,7 @@ internal static class MessageContentSources
                                 try{
                                     var client=knownClients.TryGetValue(key,out var known)?known:NotificationClient(notice.AppInfo.AppUserModelId??"",notice.AppInfo.DisplayInfo.DisplayName??"");
                                     if(client==null||!clients.Contains(client))continue;knownClients[key]=client;
-                                    var text=notice.Notification.Visual.GetBinding(KnownNotificationBindings.ToastGeneric)?.GetTextElements();
-                                    string content=text==null?"":string.Join("\n",text.Select(t=>t.Text));
+                                    string content=string.Join("\n",notice.Notification.Visual.Bindings.SelectMany(b=>{try{return b.GetTextElements()?.Select(t=>t.Text)??[];}catch{return [];}}).Where(x=>!string.IsNullOrWhiteSpace(x)));
                                     if(fingerprints.TryGetValue(key,out var previous)&&previous==content)continue;
                                     fingerprints[key]=content;if(!initialized)continue;
                                     if(client=="企业微信")Interlocked.Exchange(ref lastWecomToast,Environment.TickCount64);

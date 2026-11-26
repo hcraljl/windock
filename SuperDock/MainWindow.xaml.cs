@@ -25,8 +25,9 @@ public partial class MainWindow : Window
         public string Edge { get; set; } = "Bottom";
         public string MonitorId { get; set; } = "";
         public bool MessageRemindersEnabled {get;set;}
-        // 消息预览时长（秒）；0 = 一直显示，直到用户点击查看。
+        // 消息预览时长（秒）；0 = 一直显示，直到用户点击查看。关闭"一直显示"时恢复 Last 值。
         public int MessagePreviewSeconds {get;set;}=3;
+        public int MessagePreviewLastSeconds {get;set;}=3;
         public double MessageReminderOpacity {get;set;}=.65;
         public bool MessagePreviewEnabled {get;set;}
         public Dictionary<string,bool> MessageDetailOverrides {get;set;}=[];
@@ -258,6 +259,7 @@ public partial class MainWindow : Window
         settings.Entries ??= []; settings.Groups ??= []; settings.DockOrder ??= []; settings.MonitorIds ??= [];
         settings.MessageReminderClients ??= []; settings.MessageDetailOverrides ??= [];
         if (settings.MessagePreviewSeconds is < 0 or > 5) settings.MessagePreviewSeconds = 3;
+        if (settings.MessagePreviewLastSeconds is < 1 or > 5) settings.MessagePreviewLastSeconds = 3;
         if (!new[] { "Bottom", "Top", "Left", "Right" }.Contains(settings.Edge)) settings.Edge = "Bottom";
         if (settings.ThemeMode is not ("Light" or "Dark")) settings.ThemeMode = "Light";
         if (settings.Entries.RemoveAll(entry=>entry==null||string.IsNullOrWhiteSpace(entry.Target))>0) settings.DockOrder.RemoveAll(key=>settings.Entries.All(entry=>entry.Target!=key));

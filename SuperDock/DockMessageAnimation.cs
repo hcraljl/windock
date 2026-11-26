@@ -7,6 +7,8 @@ public partial class MainWindow
 {
     internal string DockEdge=>settings.Edge;
     internal double MessageReminderOpacity=>settings.MessageReminderOpacity;
+    // 供气泡组件读取当前预览时长等实时设置。
+    internal Settings CurrentSettings=>settings;
     // 更新提醒气泡锚点：设置图标（无则回落到应用中心图标）。
     internal FrameworkElement? SettingsAnchor()=>panel.Children.OfType<FrameworkElement>().FirstOrDefault(e=>Equals(e.Tag,"action:settings")||Equals(e.Tag,"action:library"));
     internal FrameworkElement? MessageAnchor(string client)
