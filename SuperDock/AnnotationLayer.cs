@@ -12,19 +12,26 @@ internal sealed class AnnotationLayer : Canvas
 {
     public enum Tool { None, Pen, Rect, Ellipse, Arrow, Mosaic, Text, Watermark }
     Tool current=Tool.None;Color color=Color.FromRgb(255,90,90);double strokeWidth=3;
-    public Tool Current{get=>current;set{current=value;Changed?.Invoke();}}
+    public Tool Current{get=>current;set{current=value;Changed?.Invoke();RefreshWatermark();}}
     public Color Color{get=>color;set{color=value;ColorChanged?.Invoke();}}
     public double StrokeWidth{get=>strokeWidth;set{strokeWidth=value;ColorChanged?.Invoke();}}
     // 文本字号、水印样式、马赛克强度（由工具条选项行调节）。
     public double FontSize{get;set;}=16;
     public int MosaicStrength{get;set;}=14;
-    public string WatermarkText{get;set;}="";
-    public Color WatermarkColor{get;set;}=Color.FromRgb(90,98,108);
-    public double WatermarkOpacity{get;set;}=.45;
+    string watermarkTextValue="";Color watermarkColor=Color.FromRgb(90,98,108);double watermarkOpacity=.45;
+    public string WatermarkText{get=>watermarkTextValue;set{watermarkTextValue=value;RefreshWatermark();}}
+    public Color WatermarkColor{get=>watermarkColor;set{watermarkColor=value;RefreshWatermark();}}
+    public double WatermarkOpacity{get=>watermarkOpacity;set{watermarkOpacity=Math.Clamp(value,.05,1);RefreshWatermark();}}
+    Rect? watermarkBounds;
+    // 水印铺满区域：截图=选区；贴图=整张图。由宿主设置。
+    public Rect? WatermarkBounds{get=>watermarkBounds;set{watermarkBounds=value;if(watermarkTile.Visibility==Visibility.Visible)RefreshWatermark();}}
+    // 水印自动生效：选中文本非空时立即铺满；切换到其他工具后保留，撤销/清空才移除。
+    bool watermarkApplied;
+    public bool WatermarkApplied=>watermarkApplied&&!string.IsNullOrWhiteSpace(watermarkTextValue);
     public event Action? Changed;
     public event Action? ColorChanged;
     public bool IsTyping=>typing!=null;
-    public bool HasDrawings=>Children.OfType<UIElement>().Any(c=>!ReferenceEquals(c,overlay));
+    public bool HasDrawings=>(watermarkApplied&&!string.IsNullOrWhiteSpace(watermarkTextValue))||Children.OfType<UIElement>().Any(c=>!ReferenceEquals(c,overlay)&&!ReferenceEquals(c,watermarkTile));
     // 马赛克由宿主提供像素源：给定逻辑区域返回马赛克化后的位图（截图=冻结帧区域；贴图=图片对应区域）。
     public Func<Rect,ImageSource?>? MosaicProvider {get;set;}
     readonly List<UIElement> history=[];
@@ -32,6 +39,7 @@ internal sealed class AnnotationLayer : Canvas
     sealed class TextEditor{public TextBox Box=null!;public Point Pos;}
     // 图形选择：修饰层（虚线框+8 手柄）挂在画布顶层，IsHitTestVisible=false，不参与绘制与撤销。
     readonly Canvas overlay=new(){IsHitTestVisible=false,Visibility=Visibility.Collapsed};
+    readonly Rectangle watermarkTile=new(){IsHitTestVisible=false,Visibility=Visibility.Collapsed};
     readonly Rectangle shapeBorder=new(){Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.4,StrokeDashArray=new DoubleCollection{4,3},Fill=Brushes.Transparent};
     readonly List<Ellipse> shapeHandles=new();
     public UIElement? SelectedShape{get;private set;}
@@ -54,18 +62,64 @@ internal sealed class AnnotationLayer : Canvas
         if(Children.Count>0&&ReferenceEquals(Children[Children.Count-1],overlay))return;
         Children.Remove(overlay);Children.Add(overlay);
     }
+    // —— 自动水印：平铺铺满目标区域，文本/颜色/透明度实时生效 ——
+    // 把水印层插到选择修饰层下方（图元之上），确保撤销/清空不会误删它。
+    void PlaceWatermarkTile()
+    {
+        Children.Remove(watermarkTile);
+        int at=Children.IndexOf(overlay);if(at<0)at=Children.Count;
+        Children.Insert(at,watermarkTile);
+    }
+    void RefreshWatermark()
+    {
+        bool wasApplied=watermarkApplied;
+        if(Current==Tool.Watermark&&!string.IsNullOrWhiteSpace(watermarkTextValue))watermarkApplied=true;
+        bool show=WatermarkApplied;
+        watermarkTile.Visibility=show?Visibility.Visible:Visibility.Collapsed;
+        if(!show){watermarkTile.Fill=null;if(watermarkApplied!=wasApplied)Changed?.Invoke();return;}
+        var region=watermarkBounds??new Rect(0,0,Math.Max(1,ActualWidth),Math.Max(1,ActualHeight));
+        if(region.Width<8||region.Height<8){watermarkTile.Visibility=Visibility.Collapsed;return;}
+        double ppd=1;try{ppd=VisualTreeHelper.GetDpi(this).PixelsPerDip;}catch{}
+        var face=new Typeface(new FontFamily("Microsoft YaHei UI, Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
+        var ft=new FormattedText(watermarkTextValue,System.Globalization.CultureInfo.CurrentCulture,FlowDirection.LeftToRight,face,26,new SolidColorBrush(watermarkColor),ppd);
+        var geo=ft.BuildGeometry(new Point(0,0));
+        var bounds=geo.Bounds;
+        var rotation=new RotateTransform(-30,bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2);
+        double minX=double.MaxValue,minY=double.MaxValue,maxX=double.MinValue,maxY=double.MinValue;
+        foreach(var corner in new[]{new Point(bounds.Left,bounds.Top),new Point(bounds.Right,bounds.Top),new Point(bounds.Left,bounds.Bottom),new Point(bounds.Right,bounds.Bottom)})
+        {
+            var p=rotation.Transform(corner);
+            minX=Math.Min(minX,p.X);minY=Math.Min(minY,p.Y);maxX=Math.Max(maxX,p.X);maxY=Math.Max(maxY,p.Y);
+        }
+        double padX=30,padY=20;
+        var group=new DrawingGroup
+        {
+            Transform=new TransformGroup{Children={rotation,new TranslateTransform(padX/2-minX,padY/2-minY)}},
+            Children={new GeometryDrawing{Geometry=geo,Brush=new SolidColorBrush(watermarkColor)}}
+        };
+        watermarkTile.Fill=new DrawingBrush{Drawing=group,TileMode=TileMode.Tile,Viewport=new Rect(0,0,(maxX-minX)+padX,(maxY-minY)+padY),ViewportUnits=BrushMappingMode.Absolute,Opacity=watermarkOpacity};
+        SetLeft(watermarkTile,region.Left);SetTop(watermarkTile,region.Top);
+        watermarkTile.Width=region.Width;watermarkTile.Height=region.Height;
+        watermarkTile.Clip=new RectangleGeometry(new Rect(0,0,region.Width,region.Height));
+        PlaceWatermarkTile();
+        if(watermarkApplied!=wasApplied)Changed?.Invoke();
+    }
     public void Undo()
     {
         for(int i=Children.Count-1;i>=0;i--)
         {
             var child=Children[i];
-            if(ReferenceEquals(child,overlay))continue;
+            if(ReferenceEquals(child,overlay)||ReferenceEquals(child,watermarkTile))continue;
             Children.Remove(child);history.Remove(child);
             if(ReferenceEquals(child,SelectedShape))Deselect();
             Changed?.Invoke();return;
         }
+        if(watermarkApplied) // 没有可撤销的图元时先撤水印
+        {
+            watermarkApplied=false;RefreshWatermark();Changed?.Invoke();
+        }
     }
-    public void ClearAll(){Deselect();for(int i=Children.Count-1;i>=0;i--)if(!ReferenceEquals(Children[i],overlay))Children.RemoveAt(i);history.Clear();Changed?.Invoke();}
+    public void ClearAll(){Deselect();watermarkApplied=false;RefreshWatermark();for(int i=Children.Count-1;i>=0;i--)if(!ReferenceEquals(Children[i],overlay)&&!ReferenceEquals(Children[i],watermarkTile))Children.RemoveAt(i);history.Clear();Changed?.Invoke();}
     // —— 图形选中/移动/缩放 ——
     static Rect BoundsOf(UIElement el)=>el switch
     {
@@ -250,7 +304,7 @@ internal sealed class AnnotationLayer : Canvas
         var point=e.GetPosition(this);
         if(Current==Tool.None){e.Handled=false;return;}
         if(Current==Tool.Text){BeginText(point);e.Handled=true;return;}
-        if(Current==Tool.Watermark){CommitTyping();StampWatermark(point);e.Handled=true;return;}
+        if(Current==Tool.Watermark){CommitTyping();e.Handled=true;return;} // 水印自动铺满，点击仅提交输入
         // 已选中图形：优先命中手柄（缩放）与本体（移动）
         if(SelectedShape!=null)
         {
@@ -342,13 +396,6 @@ internal sealed class AnnotationLayer : Canvas
             Changed?.Invoke();
         }
         active=null;e.Handled=true;
-    }
-    void StampWatermark(Point point)
-    {
-        if(string.IsNullOrWhiteSpace(WatermarkText))return; // 未填写内容时不放置
-        var stamp=new TextBlock{Text=WatermarkText,Foreground=new SolidColorBrush(WatermarkColor),Opacity=WatermarkOpacity,FontSize=26,FontWeight=FontWeights.SemiBold};
-        SetLeft(stamp,point.X);SetTop(stamp,point.Y-14);
-        Children.Add(stamp);history.Add(stamp);RaiseOverlay();Changed?.Invoke();
     }
     void BeginText(Point point)
     {

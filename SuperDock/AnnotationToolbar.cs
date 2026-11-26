@@ -94,7 +94,7 @@ internal static class AnnotationToolbar
         var markIcon=new Canvas{Width=16,Height=16};
         for(int i=0;i<4;i++)
         {
-            var line=new Line{X1=2+i*3.6,Y1=14,X2=6+i*3.6,Y2=2,Stroke=IconFg,StrokeThickness=1.7,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round};
+            var line=new Line{X1=.5+i*4.2,Y1=14.5,X2=4.5+i*4.2,Y2=1.5,Stroke=IconFg,StrokeThickness=1.7,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round};
             markIcon.Children.Add(line);
         }
         ToolButton("","水印",AnnotationLayer.Tool.Watermark,icon:markIcon);
@@ -254,7 +254,7 @@ internal static class AnnotationToolbar
     }
     static FrameworkElement Icon(string glyph)=>new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=15,Foreground=IconFg,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
     static FrameworkElement EllipseIcon()=>new Ellipse{Width=14,Height=14,Stroke=IconFg,StrokeThickness=1.7,Fill=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
-    static FrameworkElement Separator()=>new Border{Width=1,Height=18,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(7,0,7,0),VerticalAlignment=VerticalAlignment.Center};
+    static FrameworkElement Separator()=>new Border{Width=1,Height=18,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(3,0,3,0),VerticalAlignment=VerticalAlignment.Center};
     // 动作图标：宿主创建后追加。
     public static FrameworkElement ActionChip(string glyph,string tip,Action action,Brush? foreground=null)
     {

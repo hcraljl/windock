@@ -14,14 +14,23 @@ internal static class Screenshot
     internal static CaptureWindow? Capturing;
     public static void Begin(MainWindow.Settings settings,MainWindow owner)
     {
-        if(Capturing!=null){Capturing.Activate();return;}
+        if(Capturing is {} current)
+        {
+            if(current.IsLoaded&&current.IsVisible){current.Activate();return;}
+            // 残留的隐藏/未显示窗口：丢弃后重新开始，避免 F1 看似无反应
+            Capturing=null;try{current.Close();}catch{}
+        }
         var window=new CaptureWindow(owner,settings,translate:false);Capturing=window;
         window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
         window.Start();
     }
     public static void Translate(MainWindow.Settings settings,MainWindow owner)
     {
-        if(Capturing!=null){Capturing.Activate();return;}
+        if(Capturing is {} current)
+        {
+            if(current.IsLoaded&&current.IsVisible){current.Activate();return;}
+            Capturing=null;try{current.Close();}catch{}
+        }
         var window=new CaptureWindow(owner,settings,translate:true);Capturing=window;
         window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
         window.Start();
@@ -36,7 +45,8 @@ internal static class Screenshot
 sealed class CaptureWindow : Window
 {
     readonly MainWindow owner;readonly MainWindow.Settings settings;readonly bool translateMode;
-    readonly BitmapSource screen;readonly double dpiX,dpiY;readonly Rect area;
+    readonly BitmapSource screen;double dpiX=1,dpiY=1; // 物理像素↔逻辑坐标换算，SourceInitialized 后按窗口实际 DPI 重设
+    readonly Rect area;
     readonly Grid root=new();
     readonly Image frame=new();
     readonly AnnotationLayer layer=new();
@@ -71,7 +81,11 @@ sealed class CaptureWindow : Window
         screen=CaptureScreen(out var capturedArea,out dpiX,out dpiY);area=capturedArea;
         frame.Source=screen;
         WindowStartupLocation=WindowStartupLocation.Manual;
-        SourceInitialized+=(_,_)=>{var dpi=VisualTreeHelper.GetDpi(this);frame.Width=area.Width/dpi.DpiScaleX;frame.Height=area.Height/dpi.DpiScaleY;Width=area.Width/dpi.DpiScaleX;Height=area.Height/dpi.DpiScaleY;DesktopIntegration.MovePhysical(this,area.Left,area.Top);
+        SourceInitialized+=(_,_)=>{DesktopIntegration.MovePhysical(this,area.Left,area.Top);
+            var dpi=VisualTreeHelper.GetDpi(this);
+            // 关键：裁剪/马赛克/尺寸标注都按窗口实际 DPI 换算（否则在 125%/150% 缩放下贴图会偏移、尺寸不符）
+            dpiX=dpi.DpiScaleX;dpiY=dpi.DpiScaleY;
+            frame.Width=area.Width/dpi.DpiScaleX;frame.Height=area.Height/dpi.DpiScaleY;Width=area.Width/dpi.DpiScaleX;Height=area.Height/dpi.DpiScaleY;
             // 遮罩是 Canvas 内的 Border，必须显式设定尺寸（Canvas 不拉伸子元素），否则永远不会渲染。
             dim.Width=Width;dim.Height=Height;};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
@@ -178,6 +192,7 @@ sealed class CaptureWindow : Window
         sizeLabel.Visibility=Visibility.Visible;
         Canvas.SetLeft(sizeLabel,r.Left);Canvas.SetTop(sizeLabel,Math.Max(0,r.Top-26));
         if(!selecting)PlaceToolbar();
+        layer.WatermarkBounds=r; // 自动水印随选区铺满
     }
     void PositionHandles(Rect r)
     {
@@ -385,6 +400,8 @@ sealed class CaptureWindow : Window
             owner.SuppressForCapture();
             await Task.Delay(150); // 等 DWM 合成隐藏后的画面
             Show();
+            Activate();
+            if(!IsActive){Topmost=false;Topmost=true;Activate();} // Windows 前台锁定时强制置顶抡焦点，避免"按了没反应"
         }));
     }
     protected override void OnClosed(EventArgs e)

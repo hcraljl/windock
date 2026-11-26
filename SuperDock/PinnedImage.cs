@@ -153,6 +153,7 @@ sealed class PinnedImage : Window
         SizeToContent=SizeToContent.Manual;
         image.Width=baseImgW*zoomScale;image.Height=baseImgH*zoomScale;
         layer.Width=image.Width;layer.Height=image.Height;
+        layer.WatermarkBounds=new Rect(0,0,image.Width,image.Height);
         Width=image.Width;Height=image.Height;
         UpdateLayout();
         Left=cx-ActualWidth/2;Top=cy-ActualHeight/2;
@@ -188,6 +189,7 @@ sealed class PinnedImage : Window
             return;
         }
         layer.Visibility=Visibility.Visible;layer.Width=image.ActualWidth;layer.Height=image.ActualHeight;
+        layer.WatermarkBounds=new Rect(0,0,image.ActualWidth,image.ActualHeight); // 自动水印铺满整张图
         if(toolbar==null)
         {
             var done=AnnotationToolbar.ActionChip("","标注完成",()=>ToggleAnnotate());
