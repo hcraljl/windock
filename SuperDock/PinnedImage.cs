@@ -98,7 +98,7 @@ sealed class PinnedImage : Window
         if(toolbar==null)
         {
             var done=AnnotationToolbar.ActionChip("","标注完成",()=>ToggleAnnotate());
-            toolbar=new Border{CornerRadius=new CornerRadius(8),Background=new SolidColorBrush(Color.FromArgb(238,34,37,41)),BorderBrush=new SolidColorBrush(Color.FromArgb(38,255,255,255)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=14,ShadowDepth=3,Opacity=.35}};
+            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=14,ShadowDepth=3,Opacity=.3}};
             var host=new Canvas{Width=image.ActualWidth,Height=image.ActualHeight};
             Canvas.SetLeft(toolbar,4);Canvas.SetTop(toolbar,4);
             host.Children.Add(toolbar);

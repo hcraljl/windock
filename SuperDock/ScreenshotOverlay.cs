@@ -77,8 +77,11 @@ sealed class CaptureWindow : Window
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
         PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
         PreviewMouseLeftButtonDown+=(_,e)=>{if(selected&&!InSelection(e.GetPosition(root))&&!OverChrome(e,chrome))BeginSelect(e.GetPosition(root));};
-        // 选区二次调整：靠近选区边缘/角出现尺寸光标，拖动即可拉大拉小（默认提供，不单独列按钮）。
-        PreviewMouseLeftButtonDown+=(_,e)=>{if(!selected||selecting||OverChrome(e,chrome))return;var p=e.GetPosition(root);var edge=EdgeHit(p);if(edge!=ResizeEdge.None){StartResize(edge,p);e.Handled=true;}};
+        // 选区二次调整与整体拖动：靠近边缘/角拖动可拉大拉小；未选标注工具时按住选区内部可整框拖动（默认提供，不单独列按钮）。
+        PreviewMouseLeftButtonDown+=(_,e)=>{if(!selected||selecting||OverChrome(e,chrome))return;var p=e.GetPosition(root);
+            var edge=EdgeHit(p);
+            if(edge!=ResizeEdge.None){StartResize(edge,p);e.Handled=true;return;}
+            if(layer.Current==AnnotationLayer.Tool.None&&InSelection(p)&&selection.Width>0){StartMove(p);e.Handled=true;}};
         // 右键取消：不进入框选、不弹菜单，直接退出截图状态。
         PreviewMouseRightButtonDown+=(_,e)=>{e.Handled=true;Close();};
         MouseRightButtonDown+=(_,e)=>e.Handled=true;
@@ -88,12 +91,24 @@ sealed class CaptureWindow : Window
         MouseMove+=(_,e)=>{
             var p=e.GetPosition(root);
             if(resizing)UpdateResize(p);
+            else if(moving)UpdateMove(p);
             else if(selecting)UpdateSelection(p);
-            else if(selected)Cursor=CursorFor(EdgeHit(p));
+            else if(selected)Cursor=EdgeHit(p)!=ResizeEdge.None?CursorFor(EdgeHit(p)):layer.Current==AnnotationLayer.Tool.None&&InSelection(p)?Cursors.SizeAll:Cursors.Cross;
             else Cursor=Cursors.Cross;
             if(!IsActive)Activate();
         };
-        MouseLeftButtonUp+=(_,e)=>{if(resizing){resizing=false;ReleaseMouseCapture();Cursor=Cursors.Cross;PlaceToolbar();toolbar?.Visibility=Visibility.Visible;}else if(selecting)FinishSelection();};
+        MouseLeftButtonUp+=(_,e)=>{if(resizing||moving){resizing=false;moving=false;ReleaseMouseCapture();Cursor=Cursors.Cross;PlaceToolbar();toolbar?.Visibility=Visibility.Visible;}else if(selecting)FinishSelection();};
+    }
+    bool moving;Point moveStart;Rect moveRect;
+    void StartMove(Point point)
+    {
+        CommitTyping();moving=true;moveStart=point;moveRect=selection;CaptureMouse();
+    }
+    void UpdateMove(Point p)
+    {
+        double left=Math.Clamp(moveRect.X+(p.X-moveStart.X),0,Math.Max(0,Width-moveRect.Width));
+        double top=Math.Clamp(moveRect.Y+(p.Y-moveStart.Y),0,Math.Max(0,Height-moveRect.Height));
+        ApplySelectionRect(new Rect(left,top,moveRect.Width,moveRect.Height));
     }
     [Flags]
     enum ResizeEdge{None=0,W=1,E=2,N=4,S=8}
@@ -216,11 +231,10 @@ sealed class CaptureWindow : Window
         if(toolbar==null)
         {
             var pin=AnnotationToolbar.ActionChip("\uE718","贴到桌面置顶显示",PinCurrent);
-            var save=AnnotationToolbar.ActionChip("\uE719","保存为 PNG 文件",SaveSelection);
-            var copy=AnnotationToolbar.ActionChip("\uE8C8","复制到剪贴板（结束后截图）",CopySelection);
+            var save=AnnotationToolbar.ActionChip("\uE8B7","保存为 PNG 文件",SaveSelection);
             var cancel=AnnotationToolbar.ActionChip("\uE711","退出本次截图",Close);
-            var done=AnnotationToolbar.ActionChip("\uE73E","完成并复制",CopySelection);
-            toolbar=new Border{CornerRadius=new CornerRadius(8),Background=new SolidColorBrush(Color.FromArgb(238,34,37,41)),BorderBrush=new SolidColorBrush(Color.FromArgb(38,255,255,255)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,pin,save,copy,cancel,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.35},Cursor=Cursors.Hand};
+            var done=AnnotationToolbar.ActionChip("\uE73E","完成并复制（结束后截图）",CopySelection);
+            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,pin,save,cancel,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
             chrome.Children.Add(toolbar);
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;

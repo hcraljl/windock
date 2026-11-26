@@ -122,7 +122,7 @@ internal sealed class AnnotationLayer : Canvas
         if(length<1) return Geometry.Empty;
         var unit=new Point(vector.X/length,vector.Y/length);
         var left=new Point(to.X-(unit.X*.7-unit.Y*.7)*head,to.Y-(unit.Y*.7+unit.X*.7)*head);
-        var right=new Point(to.X-(unit.X*.7+unit.Y*.7)*head,to.Y-(unit.X*.7-unit.Y*.7)*head);
+        var right=new Point(to.X-(unit.X*.7+unit.Y*.7)*head,to.Y-(unit.Y*.7-unit.X*.7)*head);
         var geometry=new StreamGeometry();using(var ctx=geometry.Open()){ctx.BeginFigure(from,false,false);ctx.LineTo(to,true,false);ctx.BeginFigure(left,false,false);ctx.LineTo(to,true,false);ctx.LineTo(right,true,false);}
         geometry.Freeze();return geometry;
     }
