@@ -101,10 +101,12 @@ sealed class PinnedImage : Window
         }
         toolbar.Visibility=Visibility.Visible;
     }
-    static Button SmallButton(string label,string tip,Action action)=>new()
+    static Button SmallButton(string label,string tip,Action action)
     {
-        Content=label,Style=(Style)Application.Current.FindResource("GlassButton"),Height=26,Padding=new Thickness(10,2,10,2),ToolTip=tip,Cursor=Cursors.Hand,Margin=new Thickness(2,0,0,0),Background=GlassWindow.Surface,FontSize=12,Foreground=Theme.Text
-    };
+        var button=new Button{Content=label,Style=(Style)Application.Current.FindResource("GlassButton"),Height=26,Padding=new Thickness(10,2,10,2),ToolTip=tip,Cursor=Cursors.Hand,Margin=new Thickness(2,0,0,0),Background=GlassWindow.Surface,FontSize=12,Foreground=Theme.Text};
+        button.Click+=(_,_)=>action();
+        return button;
+    }
     void SaveImage()
     {
         var source=(BitmapSource)image.Source;

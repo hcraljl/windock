@@ -17,6 +17,7 @@ internal static class AnnotationToolbar
     {
         var row=new StackPanel{Orientation=Orientation.Vertical,Tag=owner};
         var tools=new StackPanel{Orientation=Orientation.Horizontal};
+        var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(8,2,0,0),Tag="actions"};
         void ToolButton(string glyph,string tip,AnnotationLayer.Tool tool)
         {
             var button=Small(glyph,tip,()=>{layer.Current=layer.Current==tool?AnnotationLayer.Tool.None:tool;Refresh();});
@@ -29,14 +30,14 @@ internal static class AnnotationToolbar
         ToolButton("\uE70B","文字",AnnotationLayer.Tool.Text);
         var undo=Small("\uE7A7","撤销",()=>layer.Undo());undo.Tag="undo";tools.Children.Add(undo);
         var clear=Small("\uE74D","清空标注",()=>layer.ClearAll());clear.Tag="clear";tools.Children.Add(clear);
-        var colors=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(10,0,0,0)};
+        var colors=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(2,0,0,0)};
         foreach(var(_,color) in Palette)
         {
             var swatch=new Border{Width=18,Height=18,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(90,255,255,255)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color};
             swatch.MouseLeftButtonUp+=(_,_)=>{layer.Color=color;Refresh();};
             colors.Children.Add(swatch);
         }
-        tools.Children.Add(colors);
+        actions.Children.Add(colors);
         var widths=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(10,0,0,0)};
         foreach(var w in Widths)
         {
@@ -44,16 +45,23 @@ internal static class AnnotationToolbar
             dot.MouseLeftButtonUp+=(_,_)=>{layer.StrokeWidth=w;Refresh();};
             widths.Children.Add(dot);
         }
-        tools.Children.Add(widths);
-        foreach(var extra in extras)tools.Children.Add(extra);
+        actions.Children.Add(widths);
+        foreach(var extra in extras)actions.Children.Add(extra);
         row.Children.Add(tools);
+        row.Children.Add(actions);
         // Refresh 同步选中态：工具高亮、颜色描边、粗细底色。
         void Refresh()
         {
-            foreach(var child in tools.Children)
+            foreach(var child in actions.Children)
             {
-                if(child is Border{Tag:Color color} swatch)swatch.BorderBrush=layer.Color==color?new SolidColorBrush(Color.FromRgb(120,190,255)):new SolidColorBrush(Color.FromArgb(90,255,255,255));
-                if(child is Border{Tag:double width} dot)dot.Background=layer.StrokeWidth==width?new SolidColorBrush(Color.FromArgb(70,255,255,255)):Brushes.Transparent;
+                if(child is StackPanel group)
+                {
+                    foreach(var inner in group.Children)
+                    {
+                        if(inner is Border{Tag:Color color} swatch)swatch.BorderBrush=layer.Color==color?new SolidColorBrush(Color.FromRgb(120,190,255)):new SolidColorBrush(Color.FromArgb(90,255,255,255));
+                        if(inner is Border{Tag:double width} dot)dot.Background=layer.StrokeWidth==width?new SolidColorBrush(Color.FromArgb(70,255,255,255)):Brushes.Transparent;
+                    }
+                }
             }
             foreach(var child in tools.Children)
             {
@@ -65,9 +73,14 @@ internal static class AnnotationToolbar
         layer.Changed+=Refresh;layer.ColorChanged+=Refresh;row.Tag=Refresh;Refresh();
         return row;
     }
-    static Button Small(string glyph,string tip,Action action)=>new()
+    static Button Small(string glyph,string tip,Action action)
     {
-        Content=new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=14,Foreground=Theme.Text},
-        Style=(Style)Application.Current.FindResource("GlassButton"),Width=32,Height=28,Padding=new Thickness(0),ToolTip=tip,Cursor=Cursors.Hand,Margin=new Thickness(2,0,2,0),HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center,Background=GlassWindow.Surface
-    };
+        var button=new Button
+        {
+            Content=new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=14,Foreground=Theme.Text},
+            Style=(Style)Application.Current.FindResource("GlassButton"),Width=32,Height=28,Padding=new Thickness(0),ToolTip=tip,Cursor=Cursors.Hand,Margin=new Thickness(2,0,2,0),HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center,Background=GlassWindow.Surface
+        };
+        button.Click+=(_,_)=>action();
+        return button;
+    }
 }

@@ -15,14 +15,7 @@ internal static class Screenshot
     public static void Begin(MainWindow.Settings settings,MainWindow owner)
     {
         if(Capturing!=null){Capturing.Activate();return;}
-        var window=new CaptureWindow(owner,settings,translate:false);Capturing=window;
-        window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
-        window.Start();
-    }
-    public static void Translate(MainWindow.Settings settings,MainWindow owner)
-    {
-        if(Capturing!=null){Capturing.Activate();return;}
-        var window=new CaptureWindow(owner,settings,translate:true);Capturing=window;
+        var window=new CaptureWindow(owner,settings);Capturing=window;
         window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
         window.Start();
     }
@@ -35,7 +28,7 @@ internal static class Screenshot
 }
 sealed class CaptureWindow : Window
 {
-    readonly MainWindow owner;readonly MainWindow.Settings settings;readonly bool translateMode;
+    readonly MainWindow owner;readonly MainWindow.Settings settings;
     readonly BitmapSource screen;readonly double dpiX,dpiY;readonly Rect area;
     readonly Grid root=new();
     readonly Image frame=new();
@@ -47,13 +40,13 @@ sealed class CaptureWindow : Window
     Border? toolbar;
     FrameworkElement? firstHint;
     Point start;bool selecting,selected;Rect selection;
-    public CaptureWindow(MainWindow owner,MainWindow.Settings settings,bool translate=false)
+    public CaptureWindow(MainWindow owner,MainWindow.Settings settings)
     {
-        this.owner=owner;this.settings=settings;translateMode=translate;
+        this.owner=owner;this.settings=settings;
         WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;ShowActivated=true;Background=Brushes.Black;Cursor=Cursors.Cross;Title="windock · 截图";
         frame.Stretch=Stretch.Fill;RenderOptions.SetBitmapScalingMode(frame,BitmapScalingMode.NearestNeighbor);
         chrome.Children.Add(dim);chrome.Children.Add(selectionBorder);chrome.Children.Add(sizeLabel);
-        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · Esc 取消 · 框选后自动识别并翻译":"拖动框选截图区域 · 完成后可用工具条标注、复制、保存或贴图",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
+        var hint=new TextBlock{Text="拖动框选截图区域 · 完成后可标注、复制、保存或贴图 · 右键或 Esc 取消",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
         chrome.Children.Add(hint);firstHint=hint;
         root.Children.Add(frame);root.Children.Add(layer);root.Children.Add(chrome);
         layer.Visibility=Visibility.Hidden; // 完成框选前不响应标注
@@ -65,6 +58,11 @@ sealed class CaptureWindow : Window
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected){CopySelection();Close();e.Handled=true;}};
         PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected){CopySelection();Close();e.Handled=true;}};
         PreviewMouseLeftButtonDown+=(_,e)=>{if(selected&&!InSelection(e.GetPosition(root))&&!OverChrome(e,chrome))BeginSelect(e.GetPosition(root));};
+        // 右键取消：不进入框选、不弹菜单，直接退出截图状态。
+        PreviewMouseRightButtonDown+=(_,e)=>{e.Handled=true;Close();};
+        MouseRightButtonDown+=(_,e)=>e.Handled=true;
+        MouseRightButtonUp+=(_,e)=>e.Handled=true;
+        ContextMenu=null;
         MouseLeftButtonDown+=(_,e)=>{if(!selected){BeginSelect(e.GetPosition(root));e.Handled=true;}};
         MouseMove+=(_,e)=>{if(selecting)UpdateSelection(e.GetPosition(root));else if(!IsActive)Activate();};
         MouseLeftButtonUp+=(_,e)=>{if(selecting)FinishSelection();};
@@ -94,54 +92,32 @@ sealed class CaptureWindow : Window
         selecting=false;
         if(selection.Width<8||selection.Height<8){dim.Clip=null;selectionBorder.Visibility=Visibility.Hidden;sizeLabel.Visibility=Visibility.Hidden;selected=false;return;}
         selected=true;
-        if(translateMode){layer.Visibility=Visibility.Visible;RunTranslation();}
-        else{layer.Visibility=Visibility.Visible;ShowToolbar();}
-    }
-    // 翻译流程：OCR 识别选区文字，再中英互译，结果卡片贴近选区展示；期间覆盖层保持可交互（可重新框选或 Esc 取消）。
-    bool translating;
-    void RunTranslation()
-    {
-        if(translating)return;translating=true;
-        sizeLabel.Text="正在识别与翻译…";sizeLabel.Visibility=Visibility.Visible;
-        Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));
-        var image=Compose();
-        _=RunTranslationAsync(image);
-    }
-    async System.Threading.Tasks.Task RunTranslationAsync(BitmapSource image)
-    {
-        var (text,ocrOk)=await Translation.RecognizeAsync(image);
-        if(!ocrOk||string.IsNullOrWhiteSpace(text)){TranslatingFailed("未识别到文字，请框选包含文字的区域");return;}
-        var (translated,detected,ok,error)=await Translation.TranslateAsync(text);
-        if(!ok){TranslatingFailed(error);return;}
-        translating=false;
-        await Dispatcher.BeginInvoke(new Action(()=>{
-            sizeLabel.Visibility=Visibility.Hidden;
-            TranslateCard.Show(text,translated,this,selection,dpiX,dpiY);
-        }));
-    }
-    void TranslatingFailed(string message)
-    {
-        translating=false;
-        Dispatcher.BeginInvoke(new Action(()=>{sizeLabel.Text=message;sizeLabel.Visibility=Visibility.Visible;Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));}));
+        layer.Visibility=Visibility.Visible;
+        ShowToolbar();
     }
     void ShowToolbar()
     {
         if(toolbar==null)
         {
-            var copy=ToolButton("复制","\uE8C8",CopySelection);
-            var save=ToolButton("保存","\uE74E",SaveSelection);
-            var pin=ToolButton("贴图","\uE8A7",PinCurrent);
-            var cancel=ToolButton("取消","\uE711",Close);
+            var copy=ToolButton("复制","复制到剪贴板","\uE8C8",CopySelection);
+            var save=ToolButton("保存","保存为 PNG 文件","\uE74E",SaveSelection);
+            var pin=ToolButton("贴图","贴到桌面置顶显示","\uE8A7",PinCurrent);
+            var cancel=ToolButton("取消","退出本次截图","\uE711",Close);
             toolbar=new Border{CornerRadius=new CornerRadius(12),Background=GlassWindow.Surface,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),Padding=new Thickness(8,6,8,6),Child=AnnotationToolbar.Build(layer,this,copy,save,pin,cancel),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.25},Cursor=Cursors.Hand};
             chrome.Children.Add(toolbar);
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;
     }
-    static Button ToolButton(string label,string glyph,Action action)=>new()
+    static Button ToolButton(string label,string tip,string glyph,Action action)
     {
-        Content=new StackPanel{Orientation=Orientation.Horizontal,Children={new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=13,Foreground=Theme.Text,VerticalAlignment=VerticalAlignment.Center},new TextBlock{Text=label,FontSize=12,Foreground=Theme.Text,Margin=new Thickness(5,0,0,0),VerticalAlignment=VerticalAlignment.Center}}},
-        Style=(Style)Application.Current.FindResource("GlassButton"),Height=30,Padding=new Thickness(10,2,10,2),Cursor=Cursors.Hand,Margin=new Thickness(2,0,0,0),Background=GlassWindow.Surface,HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center
-    };
+        var button=new Button
+        {
+            Content=new StackPanel{Orientation=Orientation.Horizontal,Children={new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=13,Foreground=Theme.Text,VerticalAlignment=VerticalAlignment.Center},new TextBlock{Text=label,FontSize=12,Foreground=Theme.Text,Margin=new Thickness(5,0,0,0),VerticalAlignment=VerticalAlignment.Center}}},
+            Style=(Style)Application.Current.FindResource("GlassButton"),Height=30,Padding=new Thickness(10,2,10,2),Cursor=Cursors.Hand,Margin=new Thickness(2,0,0,0),Background=GlassWindow.Surface,HorizontalContentAlignment=HorizontalAlignment.Center,VerticalContentAlignment=VerticalAlignment.Center,ToolTip=tip
+        };
+        button.Click+=(_,_)=>action();
+        return button;
+    }
     void PlaceToolbar()
     {
         if(toolbar==null)return;

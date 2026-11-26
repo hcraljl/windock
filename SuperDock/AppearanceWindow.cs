@@ -265,10 +265,6 @@ internal sealed partial class AppearanceWindow : Window
         var pinKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"F1","F2","F3","F4"}){var option=Button(key,()=>{settings.PinHotkey=key;changed();Navigate(page);});option.Background=settings.PinHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);pinKeys.Children.Add(option);}content.Children.Add(pinKeys);
         content.Children.Add(Text(MainWindow.PinShortcutStatus,11));
         content.Children.Add(Text("截图进行中按贴图键可直接钉住当前选区；若两个快捷键相同，贴图会为截图让位并在上方提示。",11));
-        Heading("翻译快捷键");
-        Toggle("翻译快捷键","框选屏幕文字，自动识别并中英互译（中文译为英文，英文译为中文）",settings.TranslateHotkeyEnabled,v=>settings.TranslateHotkeyEnabled=v);
-        var translateKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"Alt+F","Ctrl+Shift+F"}){var option=Button(key,()=>{settings.TranslateHotkey=key;changed();Navigate(page);});option.Background=settings.TranslateHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);translateKeys.Children.Add(option);}content.Children.Add(translateKeys);
-        content.Children.Add(Text(MainWindow.TranslateShortcutStatus,11));
     }
     void GeneralPreferences()
     {
@@ -423,52 +419,77 @@ internal sealed partial class AppearanceWindow : Window
     }
     void Todos()
     {
+        // —— 添加待办：内容输入 + 日期/时间选择 ——
         Heading("添加待办");
-        var editor=new StackPanel{Margin=new Thickness(0,0,0,10)};
-        var input=new TextBox{Height=38,FontSize=13,Padding=new Thickness(12,4,12,4),VerticalContentAlignment=VerticalAlignment.Center,ToolTip="待办内容，例如 周五提交报告"};
-        editor.Children.Add(input);
-        var pickers=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,10,0,0)};
-        var day=new ComboBox{Width=150,Height=36,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5};
-        var time=new ComboBox{Width=120,Height=36,Margin=new Thickness(8,0,0,0),VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5};
+        var input=new TextBox{Height=38,FontSize=13,Padding=new Thickness(12,4,12,4),VerticalContentAlignment=VerticalAlignment.Center};
+        if(input.Text.Length==0)input.ToolTip="输入待办内容，例如 周五提交报告";
+        var pickers=new Grid{Margin=new Thickness(0,10,0,0)};
+        pickers.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        pickers.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        pickers.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        pickers.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        var day=new ComboBox{Width=128,Height=36,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5,Margin=new Thickness(0,0,8,0)};
+        var time=new ComboBox{Width=104,Height=36,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5,Margin=new Thickness(0,0,8,0)};
         var today=DateTime.Today;
         for(int offset=0;offset<7;offset++){var date=today.AddDays(offset);day.Items.Add(new ComboBoxItem{Content=offset==0?"今天":offset==1?"明天":date.ToString("周ddd"),Tag=date});}
         var slots=new List<DateTime>();
         for(int hour=0;hour<24;hour++)foreach(var minute in new[]{0,30})slots.Add(new DateTime(today.Year,today.Month,today.Day,hour,minute,0));
         foreach(var slot in slots)time.Items.Add(new ComboBoxItem{Content=slot.ToString("HH:mm"),Tag=slot});
-        int dayIndex=0,timeIndex=0;day.SelectedIndex=0;time.SelectedIndex=0;
-        var add=Button("添加待办",()=>{
+        day.SelectedIndex=0;time.SelectedIndex=0;
+        var add=Button("添加",()=>{
             var text=input.Text.Trim();
-            if(text.Length==0){input.ToolTip="请输入待办内容";return;}
+            if(text.Length==0){input.Focus();return;}
             if(day.SelectedItem is not ComboBoxItem dayItem||dayItem.Tag is not DateTime date)return;
             if(time.SelectedItem is not ComboBoxItem timeItem||timeItem.Tag is not DateTime slot)return;
             var remind=new DateTime(date.Year,date.Month,date.Day,slot.Hour,slot.Minute,0);
             if(remind<=DateTime.Now)remind=remind.AddDays(1); // 已过时刻顺延一天，保持“未来一周内”有效
             settings.Todos.Add(new MainWindow.TodoItem{Text=text,RemindAt=remind});
-            changed();input.Clear();Navigate(page);
+            changed();input.Clear();input.Focus();Navigate(page);
         });
-        add.Margin=new Thickness(10,0,0,0);pickers.Children.Add(day);pickers.Children.Add(time);pickers.Children.Add(add);
-        editor.Children.Add(pickers);
-        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(14),Margin=new Thickness(6,6,6,14),Child=editor});
-        content.Children.Add(Text("可填写未来一周内的待办并设置提醒时间；到达时间会自动弹窗提醒未完成事项。",11));
-        Heading("待办列表");
+        add.MinWidth=88;Grid.SetColumn(add,3);
+        Grid.SetColumn(day,1);Grid.SetColumn(time,2);
+        pickers.Children.Add(day);pickers.Children.Add(time);pickers.Children.Add(add);
+        var editor=new StackPanel{Children={input,pickers}};
+        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Padding=new Thickness(14,12,12,12),Margin=new Thickness(6,4,6,10),Child=editor});
+        content.Children.Add(Text("支持未来一周内 · 到点弹窗提醒未完成事项",11));
+        // —— 未完成列表 ——
         var pending=settings.Todos.Where(item=>item!=null&&!item.Done).OrderBy(item=>item.RemindAt).ToList();
         var finished=settings.Todos.Where(item=>item!=null&&item.Done).OrderBy(item=>item.RemindAt).ToList();
-        if(settings.Todos.Count==0)content.Children.Add(Text("暂无待办。添加后会在到点时提醒。",12));
-        foreach(var item in pending.Concat(finished))
+        Heading(pending.Count==0?"未完成":$"未完成 · {pending.Count}");
+        if(settings.Todos.Count==0)
         {
-            var row=new DockPanel{Margin=new Thickness(0,0,0,8)};
-            Toggle(item.Done?"已完成":"待完成",item.Text.Length>24?item.Text[..24]+"…":item.Text,item.Done,v=>{item.Done=v;changed();Navigate(page);},false,true);
-            var body=new StackPanel{Margin=new Thickness(0,0,8,0)};
-            body.Children.Add(new TextBlock{Text=item.Text,FontSize=13.5,Foreground=item.Done?Theme.Muted:Theme.Text,TextWrapping=TextWrapping.Wrap,TextDecorations=item.Done?System.Windows.TextDecorations.Strikethrough:null});
-            string when=item.RemindAt.ToString("MM/dd HH:mm");
-            if(!item.Done&&item.RemindAt<DateTime.Now)when+=" · 已过提醒时间";
-            body.Children.Add(new TextBlock{Text=when,FontSize=11,Foreground=!item.Done&&item.RemindAt<DateTime.Now?Theme.Get("ThemeDanger"):Theme.Muted,Margin=new Thickness(0,3,0,0)});
-            row.Children.Add(body);
-            var remove=Button("",()=>{settings.Todos.Remove(item);changed();Navigate(page);});
-            remove.Width=30;remove.Height=30;remove.Padding=new Thickness(0);remove.FontFamily=new FontFamily("Segoe Fluent Icons");remove.FontSize=12;remove.Background=Brushes.Transparent;remove.ToolTip="删除";
-            DockPanel.SetDock(remove,Dock.Right);row.Children.Add(remove);
-            content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(12,8,10,8),Child=row});
+            var empty=new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Padding=new Thickness(16,18,16,18),Margin=new Thickness(6,0,6,8),Child=new TextBlock{Text="暂无待办 · 添加后到点会自动弹窗提醒",FontSize=12,Foreground=Theme.Muted,TextAlignment=TextAlignment.Center,LineHeight=20}};
+            content.Children.Add(empty);
         }
-        if(finished.Count>0)content.Children.Add(Text("已完成的待办可继续保留或删除，不影响未完成事项的提醒。",11));
+        foreach(var item in pending)content.Children.Add(TodoRow(item,true));
+        if(finished.Count>0)
+        {
+            Heading($"已完成 · {finished.Count}");
+            foreach(var item in finished)content.Children.Add(TodoRow(item,false));
+            content.Children.Add(Text("已完成的待办可继续保留或删除，不影响未完成事项的提醒。",11));
+        }
+    }
+    // 待办行卡片：左侧完成切换、中间内容与时间徽标（过期高亮）、右侧删除。
+    FrameworkElement TodoRow(MainWindow.TodoItem item,bool pending)
+    {
+        var body=new StackPanel{Margin=new Thickness(12,0,8,0)};
+        body.Children.Add(new TextBlock{Text=item.Text,FontSize=13.5,FontWeight=pending?FontWeights.Medium:FontWeights.Normal,Foreground=pending?Theme.Text:Theme.Muted,TextWrapping=TextWrapping.Wrap,TextDecorations=pending?null:System.Windows.TextDecorations.Strikethrough});
+        bool overdue=pending&&item.RemindAt<DateTime.Now;
+        var chip=new Border{CornerRadius=new CornerRadius(7),Padding=new Thickness(7,2,7,2),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,0),Background=overdue?Theme.Get("ThemeDanger"):Theme.Card,Child=new TextBlock{Text=(overdue?"已过提醒时间 · ":"提醒 ")+item.RemindAt.ToString("MM/dd HH:mm"),FontSize=10.5,Foreground=overdue?Theme.Get("ThemeDanger"):Theme.Muted}};
+        body.Children.Add(chip);
+        var toggle=new Button{Content=new TextBlock{Text=pending?"✓":"",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=13,Foreground=pending?Theme.Muted:Theme.Text},Style=(Style)FindResource("GlassButton"),Width=28,Height=28,Padding=new Thickness(0),Background=pending?Brushes.Transparent:GlassWindow.Surface,VerticalAlignment=VerticalAlignment.Center,ToolTip=pending?"标记为未完成":"标记完成"};
+        toggle.Click+=(_,_)=>{item.Done=!item.Done;changed();Navigate(page);};
+        var remove=new Button{Content=new TextBlock{Text="",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=12,Foreground=Theme.Muted},Style=(Style)FindResource("GlassButton"),Width=28,Height=28,Padding=new Thickness(0),Background=Brushes.Transparent,VerticalAlignment=VerticalAlignment.Center,ToolTip="删除"};
+        remove.Click+=(_,_)=>{settings.Todos.Remove(item);changed();Navigate(page);};
+        var row=new Grid{Opacity=pending?1:.72};
+        row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        Grid.SetColumn(toggle,0);Grid.SetColumn(body,1);Grid.SetColumn(remove,2);
+        row.Children.Add(toggle);row.Children.Add(body);row.Children.Add(remove);
+        var card=new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Padding=new Thickness(10,9,8,9),Margin=new Thickness(6,0,6,8),Child=row};
+        card.MouseEnter+=(_,_)=>card.Background=Theme.Get("ThemeHover");
+        card.MouseLeave+=(_,_)=>card.Background=SettingsCard;
+        return card;
     }
 }

@@ -11,21 +11,10 @@ public partial class MainWindow
     internal static string ShortcutStatus {get;private set;}="等待注册";
     string? fileSearchRegistered;
     internal static string FileSearchShortcutStatus {get;private set;}="等待注册";
-    string? screenshotRegistered,pinRegistered,translateRegistered;
+    string? screenshotRegistered,pinRegistered;
     internal static string ScreenshotShortcutStatus {get;private set;}="等待注册";
     internal static string PinShortcutStatus {get;private set;}="等待注册";
-    internal static string TranslateShortcutStatus {get;private set;}="等待注册";
     internal static uint FunctionKey(string key)=>key switch{"F1"=>0x70,"F2"=>0x71,"F3"=>0x72,"F4"=>0x73,"F5"=>0x74,"F6"=>0x75,_=>0x70};
-    void UpdateTranslateShortcut()
-    {
-        var desired=settings.TranslateHotkeyEnabled?settings.TranslateHotkey:"";if(translateRegistered==desired)return;translateRegistered=desired;
-        var h=new WindowInteropHelper(this).Handle;UnregisterHotKey(h,0x5149);TranslateShortcutStatus=desired==""?"已关闭":"已启用";
-        if(desired=="")return;
-        bool ctrlShift=desired=="Ctrl+Shift+F";
-        bool ok=RegisterHotKey(h,0x5149,(ctrlShift?6u:1u)|0x4000,0x46);
-        if(!ok&&settings.FileSearchHotkeyEnabled&&settings.FileSearchHotkey==desired)TranslateShortcutStatus="与文件搜索快捷键冲突，请更换";
-        else TranslateShortcutStatus=ok?"已启用":"快捷键被其他程序占用，请更换";
-    }
     void UpdateScreenshotShortcut()
     {
         var desired=settings.ScreenshotHotkeyEnabled?settings.ScreenshotHotkey:"";if(screenshotRegistered==desired)return;screenshotRegistered=desired;
@@ -49,7 +38,7 @@ public partial class MainWindow
     void UpdateFileSearchShortcut(){var desired=settings.FileSearchHotkeyEnabled?settings.FileSearchHotkey:"";if(fileSearchRegistered==desired)return;fileSearchRegistered=desired;var h=new WindowInteropHelper(this).Handle;UnregisterHotKey(h,0x5146);bool space=desired=="Alt+Space";FileSearchShortcutStatus=desired==""?"已关闭":RegisterHotKey(h,0x5146,(space?1u:3u)|0x4000,space?0x20u:0x46u)?"已启用":"快捷键被其他程序占用，请更换，或点击 Dock 搜索图标";}
     void UpdateShortcut()
     {
-        if(!IsLoaded||!HandlesGlobalShortcut)return;UpdateFileSearchShortcut();UpdateTranslateShortcut();UpdatePinShortcut();UpdateScreenshotShortcut();var desired=settings.DockHotkeyEnabled?settings.DockHotkey:"";if(registeredShortcut==desired)return;
+        if(!IsLoaded||!HandlesGlobalShortcut)return;UpdateFileSearchShortcut();UpdatePinShortcut();UpdateScreenshotShortcut();var desired=settings.DockHotkeyEnabled?settings.DockHotkey:"";if(registeredShortcut==desired)return;
         var handle=new WindowInteropHelper(this).Handle;UnregisterHotKey(handle,0x5144);registeredShortcut=desired;
         if(desired==""){ShortcutStatus="已关闭";return;}
         uint mods=desired switch{"Alt+D"=>1u,"Ctrl+Shift+D"=>6u,_=>3u};
@@ -61,7 +50,6 @@ public partial class MainWindow
         if(message==0x0312&&wParam.ToInt32()==0x5146){handled=true;ShowFileSearch();return IntPtr.Zero;}
         if(message==0x0312&&wParam.ToInt32()==0x5147){handled=true;Screenshot.Begin(settings,this);ActivityStore.Write("截图",message:"快捷键触发 · "+settings.ScreenshotHotkey);return IntPtr.Zero;}
         if(message==0x0312&&wParam.ToInt32()==0x5148){handled=true;Screenshot.PinFromClipboard(settings);return IntPtr.Zero;}
-        if(message==0x0312&&wParam.ToInt32()==0x5149){handled=true;Screenshot.Translate(settings,this);ActivityStore.Write("翻译",message:"快捷键触发");return IntPtr.Zero;}
         if(message==0x0312&&wParam.ToInt32()==0x5144){handled=true;if(Coordinator!=null)Coordinator.Toggle();else SetManualHidden(!manuallyHidden&&!IsLayerLowered);ActivityStore.Write("Dock显隐",message:manuallyHidden?"快捷键隐藏":"快捷键显示");}return IntPtr.Zero;
     }
     internal void SetManualHidden(bool value){manuallyHidden=value;hideTimer.Stop();previewTimer.Stop();preview?.Close();preview=null;groupFlyout?.Collapse();if(value)Hide();else{hidden=false;if(!IsVisible)Show();RaiseDock();Position();ScheduleHide();}}
