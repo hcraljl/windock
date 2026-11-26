@@ -107,15 +107,25 @@ sealed class PinnedImage : Window
     };
     void SaveImage()
     {
-        var dialog=new Microsoft.Win32.SaveFileDialog{Filter="PNG 图片|*.png",FileName="windock-pin-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".png"};
-        if(dialog.ShowDialog(this)!=true)return;
-        try
+        var source=(BitmapSource)image.Source;
+        var thread=new System.Threading.Thread(()=>
         {
-            using var stream=File.Create(dialog.FileName);
-            var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create((BitmapSource)image.Source));encoder.Save(stream);
-            ActivityStore.Write("贴图",message:"已保存 "+dialog.FileName);
-        }
-        catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){GlassDialog.Show("保存失败："+ex.Message);}
+            try
+            {
+                var dialog=new Microsoft.Win32.SaveFileDialog{Filter="PNG 图片|*.png",FileName="windock-pin-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".png"};
+                var pictures=Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                if(!string.IsNullOrEmpty(pictures)&&Directory.Exists(pictures))dialog.InitialDirectory=pictures;
+                if(dialog.ShowDialog()!=true)return;
+                using var stream=File.Create(dialog.FileName);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(source));encoder.Save(stream);
+                ActivityStore.Write("贴图",message:"已保存 "+dialog.FileName);
+            }
+            catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                Dispatcher.BeginInvoke(new Action(()=>GlassDialog.Show("保存失败："+ex.Message)));
+            }
+        });
+        thread.SetApartmentState(System.Threading.ApartmentState.STA);thread.IsBackground=true;thread.Start();
     }
     internal static void Pin(BitmapSource source,MainWindow.Settings settings)
     {

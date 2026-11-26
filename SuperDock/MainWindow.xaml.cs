@@ -69,6 +69,11 @@ public partial class MainWindow : Window
         public string ScreenshotHotkey { get; set; } = "F1";
         public bool PinHotkeyEnabled { get; set; } = true;
         public string PinHotkey { get; set; } = "F3";
+        // Alt+F 翻译：框选屏幕文字后 OCR 识别并中英互译。
+        public bool TranslateHotkeyEnabled { get; set; } = true;
+        public string TranslateHotkey { get; set; } = "Alt+F";
+        // 今日待办：未来一周内的待办事项与提醒时间；到点弹窗提醒未完成事项。
+        public List<TodoItem> Todos { get; set; } = [];
         public string WeatherCity { get; set; } = "";
         public double WeatherLatitude { get; set; }
         public double WeatherLongitude { get; set; }
@@ -86,6 +91,14 @@ public partial class MainWindow : Window
         public double LaunchEffectDuration { get; set; } = .5;
         public double CornerRadius { get; set; } = 18;
         public List<Entry> Entries { get; set; } = [new("资源管理器", "explorer.exe"), new("设置", "ms-settings:"), new("计算器", "calc.exe")];
+    }
+    public sealed class TodoItem
+    {
+        public string Text { get; set; } = "";
+        public DateTime RemindAt { get; set; }
+        public bool Done { get; set; }
+        // 每条待办到达提醒时间只弹窗一次；“稍后提醒”会把 Notified 复位并顺延时间。
+        public bool Notified { get; set; }
     }
     readonly string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SuperDock", "settings.json");
     Settings settings = new();
@@ -180,11 +193,11 @@ public partial class MainWindow : Window
         MouseLeave += (_, _) => ScheduleHide();
         hideTimer.Tick += (_, _) => { hideTimer.Stop(); if (settings.AutoHide && settings.DockLift <= 0 && !IsMouseOver && openMenus == 0 && appearanceWindow==null && addApplicationsWindow==null && preview == null) { hidden = true; Position(); } };
         shimmerTimer.Tick+=(_,_)=>PlayShimmer();
-        Loaded += (_, _) => { UpdateShortcut();Position(); DesktopIntegration.Blur(this,false); ScheduleHide();shimmerTimer.Start();PlayShimmer();if(HandlesGlobalShortcut)_=WarmApplicationCenter(); };
+        Loaded += (_, _) => { UpdateShortcut();Position(); DesktopIntegration.Blur(this,false); ScheduleHide();shimmerTimer.Start();PlayShimmer();if(HandlesGlobalShortcut){_=WarmApplicationCenter();todoTimer.Tick+=(_,_)=>CheckTodoReminder();todoTimer.Start();Dispatcher.BeginInvoke(new Action(CheckTodoReminder),DispatcherPriority.ApplicationIdle);} };
         DpiChanged+=(_,_)=>Dispatcher.BeginInvoke(new Action(Position));
         SizeChanged += (_, _) => Position();
         SystemParameters.StaticPropertyChanged += DisplayChanged;
-        Closed += (_, _) => { closed = true;if(entryRefreshPending){entryRefreshPending=false;Save();}UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5144);UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5146);shimmerTimer.Stop();shimmer.BeginAnimation(OpacityProperty,null); runningTimer.Stop(); foregroundTimer.Stop(); hideTimer.Stop(); previewTimer.Stop(); closeTimer.Stop(); preview?.Close(); CompositionTarget.Rendering -= MagnifyFrame;CompositionTarget.Rendering -= ReorderFrame;reorderItem=null;magnifying=false; magnifyValues.Clear(); magnifySpeeds.Clear(); SystemParameters.StaticPropertyChanged -= DisplayChanged; };
+        Closed += (_, _) => { closed = true;if(entryRefreshPending){entryRefreshPending=false;Save();}UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5144);UnregisterHotKey(new WindowInteropHelper(this).Handle,0x5146);shimmerTimer.Stop();shimmer.BeginAnimation(OpacityProperty,null); runningTimer.Stop(); foregroundTimer.Stop(); hideTimer.Stop(); previewTimer.Stop(); closeTimer.Stop(); todoTimer.Stop(); preview?.Close(); CompositionTarget.Rendering -= MagnifyFrame;CompositionTarget.Rendering -= ReorderFrame;reorderItem=null;magnifying=false; magnifyValues.Clear(); magnifySpeeds.Clear(); SystemParameters.StaticPropertyChanged -= DisplayChanged; };
         Render();
     }
     static string SettingsPath()=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SuperDock","settings.json");
@@ -286,6 +299,10 @@ public partial class MainWindow : Window
         settings.ScreenshotHotkey = NormalizeFnKey(settings.ScreenshotHotkey, "F1");
         settings.PinHotkey = NormalizeFnKey(settings.PinHotkey, "F3");
         if (settings.ScreenshotHotkey == settings.PinHotkey) settings.PinHotkey = "F3"; // 双键同键时保留截图键，贴图回落默认
+        settings.TranslateHotkey = (settings.TranslateHotkey ?? "").Trim() switch { "Ctrl+Shift+F" => "Ctrl+Shift+F", "Alt+F" => "Alt+F", _ => "Alt+F" };
+        settings.Todos ??= [];
+        settings.Todos.RemoveAll(item => item == null || string.IsNullOrWhiteSpace(item.Text));
+        foreach (var todo in settings.Todos) if (todo.RemindAt.Kind == DateTimeKind.Unspecified) todo.RemindAt = DateTime.SpecifyKind(todo.RemindAt, DateTimeKind.Local);
         settings.DockOffset = double.IsFinite(settings.DockOffset) ? settings.DockOffset : 0;
         settings.DockLift = double.IsFinite(settings.DockLift) && settings.DockLift > 0 ? settings.DockLift : 0;
         settings.ReflectionRatio = double.IsFinite(settings.ReflectionRatio) ? Math.Clamp(settings.ReflectionRatio,0,1) : 0;

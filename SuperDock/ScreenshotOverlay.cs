@@ -15,7 +15,14 @@ internal static class Screenshot
     public static void Begin(MainWindow.Settings settings,MainWindow owner)
     {
         if(Capturing!=null){Capturing.Activate();return;}
-        var window=new CaptureWindow(owner,settings);Capturing=window;
+        var window=new CaptureWindow(owner,settings,translate:false);Capturing=window;
+        window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
+        window.Start();
+    }
+    public static void Translate(MainWindow.Settings settings,MainWindow owner)
+    {
+        if(Capturing!=null){Capturing.Activate();return;}
+        var window=new CaptureWindow(owner,settings,translate:true);Capturing=window;
         window.Closed+=(_,_)=>{if(Capturing==window)Capturing=null;};
         window.Start();
     }
@@ -28,7 +35,7 @@ internal static class Screenshot
 }
 sealed class CaptureWindow : Window
 {
-    readonly MainWindow owner;readonly MainWindow.Settings settings;
+    readonly MainWindow owner;readonly MainWindow.Settings settings;readonly bool translateMode;
     readonly BitmapSource screen;readonly double dpiX,dpiY;readonly Rect area;
     readonly Grid root=new();
     readonly Image frame=new();
@@ -38,13 +45,16 @@ sealed class CaptureWindow : Window
     readonly Rectangle selectionBorder=new(){Stroke=new SolidColorBrush(Color.FromRgb(111,207,255)),StrokeThickness=1.4,Visibility=Visibility.Hidden};
     readonly TextBlock sizeLabel=new(){Foreground=Brushes.White,FontSize=12,FontWeight=FontWeights.SemiBold,Padding=new Thickness(6,3,6,3),Visibility=Visibility.Hidden};
     Border? toolbar;
+    FrameworkElement? firstHint;
     Point start;bool selecting,selected;Rect selection;
-    public CaptureWindow(MainWindow owner,MainWindow.Settings settings)
+    public CaptureWindow(MainWindow owner,MainWindow.Settings settings,bool translate=false)
     {
-        this.owner=owner;this.settings=settings;
+        this.owner=owner;this.settings=settings;translateMode=translate;
         WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;ShowActivated=true;Background=Brushes.Black;Cursor=Cursors.Cross;Title="windock · 截图";
         frame.Stretch=Stretch.Fill;RenderOptions.SetBitmapScalingMode(frame,BitmapScalingMode.NearestNeighbor);
         chrome.Children.Add(dim);chrome.Children.Add(selectionBorder);chrome.Children.Add(sizeLabel);
+        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · Esc 取消 · 框选后自动识别并翻译":"拖动框选截图区域 · 完成后可用工具条标注、复制、保存或贴图",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
+        chrome.Children.Add(hint);firstHint=hint;
         root.Children.Add(frame);root.Children.Add(layer);root.Children.Add(chrome);
         layer.Visibility=Visibility.Hidden; // 完成框选前不响应标注
         Content=root;
@@ -53,9 +63,10 @@ sealed class CaptureWindow : Window
         WindowStartupLocation=WindowStartupLocation.Manual;
         SourceInitialized+=(_,_)=>{var dpi=VisualTreeHelper.GetDpi(this);frame.Width=area.Width/dpi.DpiScaleX;frame.Height=area.Height/dpi.DpiScaleY;Width=area.Width/dpi.DpiScaleX;Height=area.Height/dpi.DpiScaleY;DesktopIntegration.MovePhysical(this,area.Left,area.Top);};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected){CopySelection();Close();e.Handled=true;}};
+        PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected){CopySelection();Close();e.Handled=true;}};
         PreviewMouseLeftButtonDown+=(_,e)=>{if(selected&&!InSelection(e.GetPosition(root))&&!OverChrome(e,chrome))BeginSelect(e.GetPosition(root));};
         MouseLeftButtonDown+=(_,e)=>{if(!selected){BeginSelect(e.GetPosition(root));e.Handled=true;}};
-        MouseMove+=(_,e)=>{if(selecting)UpdateSelection(e.GetPosition(root));};
+        MouseMove+=(_,e)=>{if(selecting)UpdateSelection(e.GetPosition(root));else if(!IsActive)Activate();};
         MouseLeftButtonUp+=(_,e)=>{if(selecting)FinishSelection();};
     }
     static bool OverChrome(MouseEventArgs e,DependencyObject chrome)=>e.OriginalSource is DependencyObject d&&IsDescendantOf(d,chrome);
@@ -63,7 +74,7 @@ sealed class CaptureWindow : Window
     bool InSelection(Point point)=>selection.Contains(point);
     void BeginSelect(Point point)
     {
-        CommitTyping();layer.ClearAll();toolbar?.Visibility=Visibility.Collapsed;selected=false;selecting=true;start=point;
+        CommitTyping();layer.ClearAll();toolbar?.Visibility=Visibility.Collapsed;if(firstHint!=null){chrome.Children.Remove(firstHint);firstHint=null;}selected=false;selecting=true;start=point;
         layer.Visibility=Visibility.Hidden;UpdateSelection(point);
     }
     void UpdateSelection(Point point)
@@ -82,7 +93,36 @@ sealed class CaptureWindow : Window
     {
         selecting=false;
         if(selection.Width<8||selection.Height<8){dim.Clip=null;selectionBorder.Visibility=Visibility.Hidden;sizeLabel.Visibility=Visibility.Hidden;selected=false;return;}
-        selected=true;layer.Visibility=Visibility.Visible;ShowToolbar();
+        selected=true;
+        if(translateMode){layer.Visibility=Visibility.Visible;RunTranslation();}
+        else{layer.Visibility=Visibility.Visible;ShowToolbar();}
+    }
+    // 翻译流程：OCR 识别选区文字，再中英互译，结果卡片贴近选区展示；期间覆盖层保持可交互（可重新框选或 Esc 取消）。
+    bool translating;
+    void RunTranslation()
+    {
+        if(translating)return;translating=true;
+        sizeLabel.Text="正在识别与翻译…";sizeLabel.Visibility=Visibility.Visible;
+        Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));
+        var image=Compose();
+        _=RunTranslationAsync(image);
+    }
+    async System.Threading.Tasks.Task RunTranslationAsync(BitmapSource image)
+    {
+        var (text,ocrOk)=await Translation.RecognizeAsync(image);
+        if(!ocrOk||string.IsNullOrWhiteSpace(text)){TranslatingFailed("未识别到文字，请框选包含文字的区域");return;}
+        var (translated,detected,ok,error)=await Translation.TranslateAsync(text);
+        if(!ok){TranslatingFailed(error);return;}
+        translating=false;
+        await Dispatcher.BeginInvoke(new Action(()=>{
+            sizeLabel.Visibility=Visibility.Hidden;
+            TranslateCard.Show(text,translated,this,selection,dpiX,dpiY);
+        }));
+    }
+    void TranslatingFailed(string message)
+    {
+        translating=false;
+        Dispatcher.BeginInvoke(new Action(()=>{sizeLabel.Text=message;sizeLabel.Visibility=Visibility.Visible;Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));}));
     }
     void ShowToolbar()
     {
@@ -134,17 +174,28 @@ sealed class CaptureWindow : Window
         rtb.Render(visual);rtb.Freeze();return rtb;
     }
     void CopySelection(){try{System.Windows.Clipboard.SetImage(Compose());}catch(Exception ex)when(ex is System.Runtime.InteropServices.COMException){GlassDialog.Show("复制失败："+ex.Message);}}
+    // 保存放到独立 STA 线程：实测在部分机器上 Vista 文件对话框可能长时间不显示却阻塞 UI 线程（首个 ~43s，失败 ~30s），导致覆盖层假死。
     void SaveSelection()
     {
-        var dialog=new Microsoft.Win32.SaveFileDialog{Filter="PNG 图片|*.png",FileName="windock-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".png"};
-        if(dialog.ShowDialog(this)!=true)return;
-        try
+        var image=Compose();
+        var thread=new System.Threading.Thread(()=>
         {
-            using var stream=File.Create(dialog.FileName);
-            var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(Compose()));encoder.Save(stream);
-            ActivityStore.Write("截图",message:"已保存 "+dialog.FileName);
-        }
-        catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){GlassDialog.Show("保存失败："+ex.Message);}
+            try
+            {
+                var dialog=new Microsoft.Win32.SaveFileDialog{Filter="PNG 图片|*.png",FileName="windock-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".png"};
+                var pictures=Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                if(!string.IsNullOrEmpty(pictures)&&Directory.Exists(pictures))dialog.InitialDirectory=pictures;
+                if(dialog.ShowDialog()!=true)return;
+                using var stream=File.Create(dialog.FileName);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(image));encoder.Save(stream);
+                ActivityStore.Write("截图",message:"已保存 "+dialog.FileName);
+            }
+            catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                Dispatcher.BeginInvoke(new Action(()=>GlassDialog.Show("保存失败："+ex.Message)));
+            }
+        });
+        thread.SetApartmentState(System.Threading.ApartmentState.STA);thread.IsBackground=true;thread.Start();
     }
     public void PinCurrent()
     {

@@ -33,7 +33,7 @@ internal sealed partial class AppearanceWindow : Window
         var brandName=new TextBlock{Text="windock",FontSize=16,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,0,0)};Grid.SetColumn(brandName,1);identity.Children.Add(brandName);brand.Children.Add(identity);BuildSettingsSearch(brand);
         var footer=new TextBlock{Text="更改自动保存",Foreground=Theme.Muted,FontSize=11,LineHeight=20,Margin=new Thickness(8,16,0,0)};DockPanel.SetDock(footer,Dock.Bottom);sidebar.Children.Add(footer);
         var nav=new StackPanel();sidebar.Children.Add(nav);
-        foreach(var (name,glyph) in new[]{("桌面偏好","\uE790"),("应用管理","\uE8B7"),("使用记录","\uE9D9"),("高级设置","\uE713")})
+        foreach(var (name,glyph) in new[]{("桌面偏好","\uE790"),("今日代办","\uE762"),("应用管理","\uE8B7"),("使用记录","\uE9D9"),("高级设置","\uE713")})
         {
             var button=Button("",()=>Navigate(name));var navFace=new StackPanel{Orientation=Orientation.Horizontal};navFace.Children.Add(new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=15,Width=27,VerticalAlignment=VerticalAlignment.Center});navFace.Children.Add(new TextBlock{Text=name,FontSize=13,VerticalAlignment=VerticalAlignment.Center});button.Content=navFace;button.Style=(Style)FindResource("SettingsNavigation");button.MinHeight=36;button.Padding=new Thickness(12,0,10,0);button.BorderThickness=new Thickness(0);button.FocusVisualStyle=null;button.Margin=new Thickness(0,0,0,4);button.HorizontalContentAlignment=HorizontalAlignment.Left;navigation[name]=button;nav.Children.Add(button);
         }
@@ -108,6 +108,7 @@ internal sealed partial class AppearanceWindow : Window
             case "应用管理": Applications();break;
             case "桌面组件": Components();break;
             case "使用记录": Records();break;
+            case "今日代办": Todos();break;
             default:
                 Maintenance();break;
         }
@@ -264,6 +265,10 @@ internal sealed partial class AppearanceWindow : Window
         var pinKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"F1","F2","F3","F4"}){var option=Button(key,()=>{settings.PinHotkey=key;changed();Navigate(page);});option.Background=settings.PinHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);pinKeys.Children.Add(option);}content.Children.Add(pinKeys);
         content.Children.Add(Text(MainWindow.PinShortcutStatus,11));
         content.Children.Add(Text("截图进行中按贴图键可直接钉住当前选区；若两个快捷键相同，贴图会为截图让位并在上方提示。",11));
+        Heading("翻译快捷键");
+        Toggle("翻译快捷键","框选屏幕文字，自动识别并中英互译（中文译为英文，英文译为中文）",settings.TranslateHotkeyEnabled,v=>settings.TranslateHotkeyEnabled=v);
+        var translateKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"Alt+F","Ctrl+Shift+F"}){var option=Button(key,()=>{settings.TranslateHotkey=key;changed();Navigate(page);});option.Background=settings.TranslateHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);translateKeys.Children.Add(option);}content.Children.Add(translateKeys);
+        content.Children.Add(Text(MainWindow.TranslateShortcutStatus,11));
     }
     void GeneralPreferences()
     {
@@ -416,59 +421,54 @@ internal sealed partial class AppearanceWindow : Window
 
         content.Children.Add(new Expander{Header="数据说明",Margin=new Thickness(0,12,0,0),Content=Text("GPU 为最繁忙引擎占用；网络包含虚拟网卡；天气为模型估算。",11)});
     }
+    void Todos()
+    {
+        Heading("添加待办");
+        var editor=new StackPanel{Margin=new Thickness(0,0,0,10)};
+        var input=new TextBox{Height=38,FontSize=13,Padding=new Thickness(12,4,12,4),VerticalContentAlignment=VerticalAlignment.Center,ToolTip="待办内容，例如 周五提交报告"};
+        editor.Children.Add(input);
+        var pickers=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,10,0,0)};
+        var day=new ComboBox{Width=150,Height=36,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5};
+        var time=new ComboBox{Width=120,Height=36,Margin=new Thickness(8,0,0,0),VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5};
+        var today=DateTime.Today;
+        for(int offset=0;offset<7;offset++){var date=today.AddDays(offset);day.Items.Add(new ComboBoxItem{Content=offset==0?"今天":offset==1?"明天":date.ToString("周ddd"),Tag=date});}
+        var slots=new List<DateTime>();
+        for(int hour=0;hour<24;hour++)foreach(var minute in new[]{0,30})slots.Add(new DateTime(today.Year,today.Month,today.Day,hour,minute,0));
+        foreach(var slot in slots)time.Items.Add(new ComboBoxItem{Content=slot.ToString("HH:mm"),Tag=slot});
+        int dayIndex=0,timeIndex=0;day.SelectedIndex=0;time.SelectedIndex=0;
+        var add=Button("添加待办",()=>{
+            var text=input.Text.Trim();
+            if(text.Length==0){input.ToolTip="请输入待办内容";return;}
+            if(day.SelectedItem is not ComboBoxItem dayItem||dayItem.Tag is not DateTime date)return;
+            if(time.SelectedItem is not ComboBoxItem timeItem||timeItem.Tag is not DateTime slot)return;
+            var remind=new DateTime(date.Year,date.Month,date.Day,slot.Hour,slot.Minute,0);
+            if(remind<=DateTime.Now)remind=remind.AddDays(1); // 已过时刻顺延一天，保持“未来一周内”有效
+            settings.Todos.Add(new MainWindow.TodoItem{Text=text,RemindAt=remind});
+            changed();input.Clear();Navigate(page);
+        });
+        add.Margin=new Thickness(10,0,0,0);pickers.Children.Add(day);pickers.Children.Add(time);pickers.Children.Add(add);
+        editor.Children.Add(pickers);
+        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(14),Margin=new Thickness(6,6,6,14),Child=editor});
+        content.Children.Add(Text("可填写未来一周内的待办并设置提醒时间；到达时间会自动弹窗提醒未完成事项。",11));
+        Heading("待办列表");
+        var pending=settings.Todos.Where(item=>item!=null&&!item.Done).OrderBy(item=>item.RemindAt).ToList();
+        var finished=settings.Todos.Where(item=>item!=null&&item.Done).OrderBy(item=>item.RemindAt).ToList();
+        if(settings.Todos.Count==0)content.Children.Add(Text("暂无待办。添加后会在到点时提醒。",12));
+        foreach(var item in pending.Concat(finished))
+        {
+            var row=new DockPanel{Margin=new Thickness(0,0,0,8)};
+            Toggle(item.Done?"已完成":"待完成",item.Text.Length>24?item.Text[..24]+"…":item.Text,item.Done,v=>{item.Done=v;changed();Navigate(page);},false,true);
+            var body=new StackPanel{Margin=new Thickness(0,0,8,0)};
+            body.Children.Add(new TextBlock{Text=item.Text,FontSize=13.5,Foreground=item.Done?Theme.Muted:Theme.Text,TextWrapping=TextWrapping.Wrap,TextDecorations=item.Done?System.Windows.TextDecorations.Strikethrough:null});
+            string when=item.RemindAt.ToString("MM/dd HH:mm");
+            if(!item.Done&&item.RemindAt<DateTime.Now)when+=" · 已过提醒时间";
+            body.Children.Add(new TextBlock{Text=when,FontSize=11,Foreground=!item.Done&&item.RemindAt<DateTime.Now?Theme.Get("ThemeDanger"):Theme.Muted,Margin=new Thickness(0,3,0,0)});
+            row.Children.Add(body);
+            var remove=Button("",()=>{settings.Todos.Remove(item);changed();Navigate(page);});
+            remove.Width=30;remove.Height=30;remove.Padding=new Thickness(0);remove.FontFamily=new FontFamily("Segoe Fluent Icons");remove.FontSize=12;remove.Background=Brushes.Transparent;remove.ToolTip="删除";
+            DockPanel.SetDock(remove,Dock.Right);row.Children.Add(remove);
+            content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(12,8,10,8),Child=row});
+        }
+        if(finished.Count>0)content.Children.Add(Text("已完成的待办可继续保留或删除，不影响未完成事项的提醒。",11));
+    }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

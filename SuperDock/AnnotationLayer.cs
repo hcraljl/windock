@@ -15,6 +15,7 @@ internal sealed class AnnotationLayer : Canvas
     public double StrokeWidth{get=>strokeWidth;set{strokeWidth=value;Changed?.Invoke();}}
     public event Action? Changed;
     public event Action? ColorChanged;
+    public bool IsTyping=>typing!=null;
     public bool HasDrawings=>Children.Count>0;
     readonly List<UIElement> history=[];
     Point start;UIElement? active;TextEditor? typing;
