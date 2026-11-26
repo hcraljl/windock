@@ -256,6 +256,14 @@ internal sealed partial class AppearanceWindow : Window
         Heading("全局快捷键");
         Toggle("快捷键显隐","隐藏后再次按快捷键显示 Dock",settings.DockHotkeyEnabled,v=>settings.DockHotkeyEnabled=v);
         var shortcuts=new UniformGrid{Columns=3,Width=380,HorizontalAlignment=HorizontalAlignment.Left};foreach(var key in new[]{"Alt+D","Ctrl+Alt+D","Ctrl+Shift+D"}){var button=Button(key,()=>{settings.DockHotkey=key;changed();Navigate(page);});button.Background=settings.DockHotkey==key?Theme.Selected:SettingsCard;button.Margin=new Thickness(4);shortcuts.Children.Add(button);}content.Children.Add(shortcuts);content.Children.Add(Text(MainWindow.ShortcutStatus,11));Toggle("文件搜索快捷键","Alt+空格或 Ctrl+Alt+F 打开原版搜索窗口",settings.FileSearchHotkeyEnabled,v=>settings.FileSearchHotkeyEnabled=v);var searchKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"Alt+Space","Ctrl+Alt+F"}){var option=Button(key=="Alt+Space"?"Alt+空格":key,()=>{settings.FileSearchHotkey=key;changed();Navigate(page);});option.Background=settings.FileSearchHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);searchKeys.Children.Add(option);}content.Children.Add(searchKeys);content.Children.Add(Text(MainWindow.FileSearchShortcutStatus,11));
+        Heading("截图与贴图");
+        Toggle("截图快捷键","框选屏幕截图，可涂鸦、标注、复制、保存或贴图",settings.ScreenshotHotkeyEnabled,v=>settings.ScreenshotHotkeyEnabled=v);
+        var screenshotKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"F1","F2","F3","F4"}){var option=Button(key,()=>{settings.ScreenshotHotkey=key;changed();Navigate(page);});option.Background=settings.ScreenshotHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);screenshotKeys.Children.Add(option);}content.Children.Add(screenshotKeys);
+        content.Children.Add(Text(MainWindow.ScreenshotShortcutStatus,11));
+        Toggle("贴图快捷键","将截图或剪贴板中的图片贴到桌面置顶显示：拖动移动、滚轮缩放、右键菜单可标注/复制/保存",settings.PinHotkeyEnabled,v=>settings.PinHotkeyEnabled=v);
+        var pinKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"F1","F2","F3","F4"}){var option=Button(key,()=>{settings.PinHotkey=key;changed();Navigate(page);});option.Background=settings.PinHotkey==key?Theme.Selected:SettingsCard;option.Margin=new Thickness(0,0,8,8);pinKeys.Children.Add(option);}content.Children.Add(pinKeys);
+        content.Children.Add(Text(MainWindow.PinShortcutStatus,11));
+        content.Children.Add(Text("截图进行中按贴图键可直接钉住当前选区；若两个快捷键相同，贴图会为截图让位并在上方提示。",11));
     }
     void GeneralPreferences()
     {
@@ -281,7 +289,7 @@ internal sealed partial class AppearanceWindow : Window
                 var restored=System.Text.Json.JsonSerializer.Deserialize<MainWindow.Settings>(File.ReadAllText(dialog.FileName))??throw new System.Text.Json.JsonException();
                 if(!new[]{"Light","Dark"}.Contains(restored.ThemeMode)||!new[]{"Left","Right","Top","Bottom"}.Contains(restored.Edge)||restored.Entries==null||restored.Groups==null||restored.Entries.Any(e=>e==null||string.IsNullOrWhiteSpace(e.Target)||string.IsNullOrWhiteSpace(e.Name))||restored.Groups.Any(g=>g==null||string.IsNullOrWhiteSpace(g.Name)||g.Entries==null||g.Entries.Any(e=>e==null||string.IsNullOrWhiteSpace(e.Target)||string.IsNullOrWhiteSpace(e.Name))))throw new System.Text.Json.JsonException("无效的入口或分组");
                 bool Valid(double v,double min,double max)=>double.IsFinite(v)&&v>=min&&v<=max;
-                if(restored.WidgetIntervalSeconds<1||restored.WidgetIntervalSeconds>3600||restored.MessagePreviewSeconds is < 0 or > 5||restored.MessagePreviewLastSeconds is < 1 or > 5||!Valid(restored.DockHeight,48,120)||!Valid(restored.IconSize,24,64)||!Valid(restored.GlassOpacity,0,1)||!Valid(restored.IconSpacing,0,16)||!Valid(restored.HoverScale,1,2.5)||!Valid(restored.CornerRadius,0,32))throw new System.Text.Json.JsonException("外观参数超出范围");
+                if(string.IsNullOrWhiteSpace(restored.WidgetColor)||!System.Text.RegularExpressions.Regex.IsMatch(restored.WidgetColor.Trim(),"^#[0-9A-Fa-f]{6}$")||!new[]{"F1","F2","F3","F4"}.Contains(restored.ScreenshotHotkey)||!new[]{"F1","F2","F3","F4"}.Contains(restored.PinHotkey)||restored.WidgetIntervalSeconds<1||restored.WidgetIntervalSeconds>3600||restored.MessagePreviewSeconds is < 0 or > 5||restored.MessagePreviewLastSeconds is < 1 or > 5||!Valid(restored.DockHeight,48,120)||!Valid(restored.IconSize,24,64)||!Valid(restored.GlassOpacity,0,1)||!Valid(restored.IconSpacing,0,16)||!Valid(restored.HoverScale,1,2.5)||!Valid(restored.CornerRadius,0,32))throw new System.Text.Json.JsonException("外观参数超出范围");
                 var local=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SuperDock");Directory.CreateDirectory(local);File.WriteAllText(Path.Combine(local,"settings.before-restore.json"),System.Text.Json.JsonSerializer.Serialize(settings));
                 foreach(var property in typeof(MainWindow.Settings).GetProperties())property.SetValue(settings,property.GetValue(restored));changed();ApplyWindowTheme();Navigate(page);
             }
@@ -366,6 +374,18 @@ internal sealed partial class AppearanceWindow : Window
         Toggle("城市天气","实时天气与气温",settings.WeatherWidget,v=>settings.WeatherWidget=v,true);
         Toggle("时钟与日历","时间、日期与月历",settings.ClockWidget,v=>settings.ClockWidget=v,true);
         Toggle("磁盘空间","系统磁盘剩余容量",settings.StorageWidget,v=>settings.StorageWidget=v,true);
+        Heading("显示颜色");
+        var palette=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,10)};
+        foreach(var(name,hex) in new[]{("白色","#FFFFFF"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")})
+        {
+            var swatch=new Border{Width=30,Height=30,CornerRadius=new CornerRadius(15),Background=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)),BorderBrush=settings.WidgetColor==hex?new SolidColorBrush(System.Windows.Media.Color.FromRgb(96,171,255)):new SolidColorBrush(System.Windows.Media.Color.FromArgb(90,255,255,255)),BorderThickness=new Thickness(settings.WidgetColor==hex?2.4:1),Cursor=Cursors.Hand,Margin=new Thickness(0,0,8,0),ToolTip=name};
+            swatch.MouseLeftButtonUp+=(_,_)=>{settings.WidgetColor=hex;WidgetPaint.Apply(hex);changed();Navigate(page);};
+            palette.Children.Add(swatch);
+        }
+        var colorName=new TextBlock{Text="当前："+(new[]{("白色","#FFFFFF"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")}.FirstOrDefault(c=>c.Item2==settings.WidgetColor).Item1??settings.WidgetColor),FontSize=12,Foreground=Theme.Muted,VerticalAlignment=VerticalAlignment.Center};
+        palette.Children.Add(colorName);
+        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Theme.Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(10),Padding=new Thickness(14),Margin=new Thickness(6,6,6,14),Child=palette});
+        content.Children.Add(Text("切换后立即生效，并随配置保存。",11));
                 Heading("轮播设置");
         var intervals=new UniformGrid{Columns=5,Width=380,HorizontalAlignment=HorizontalAlignment.Left};
         foreach(int seconds in new[]{5,15,30,60}){var preset=Button(seconds+" 秒",()=>{settings.WidgetIntervalSeconds=seconds;changed();Navigate(page);});preset.Margin=new Thickness(0,0,8,0);preset.Background=settings.WidgetIntervalSeconds==seconds?Theme.Selected:Theme.Card;intervals.Children.Add(preset);}var customize=Button("自定义",()=>{customInterval=!customInterval;Navigate(page);});customize.Margin=new Thickness(0);customize.Background=customInterval?Theme.Selected:SettingsCard;intervals.Children.Add(customize);content.Children.Add(intervals);

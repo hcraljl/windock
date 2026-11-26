@@ -58,10 +58,17 @@ public partial class MainWindow : Window
         public bool ShowDirectionArrows { get; set; } = true;
         public List<string> DockOrder { get; set; } = [];
         public int WidgetIntervalSeconds { get; set; } = 15;
+        // 桌面组件文字颜色（十六进制）；Migrate 统一归一，颜色切换通过共享画刷即时生效。
+        public string WidgetColor { get; set; } = "#FFFFFF";
         public bool ClockWidget { get; set; }
         public bool StorageWidget { get; set; }
         public bool WeatherWidget { get; set; }
         public bool PerformanceWidget { get; set; }
+        // 截图（默认 F1）与贴图（默认 F3）全局快捷键；与 Dock 显隐/文件搜索快捷键同为 RegisterHotKey 管理，冲突时给出提示。
+        public bool ScreenshotHotkeyEnabled { get; set; } = true;
+        public string ScreenshotHotkey { get; set; } = "F1";
+        public bool PinHotkeyEnabled { get; set; } = true;
+        public string PinHotkey { get; set; } = "F3";
         public string WeatherCity { get; set; } = "";
         public double WeatherLatitude { get; set; }
         public double WeatherLongitude { get; set; }
@@ -159,6 +166,7 @@ public partial class MainWindow : Window
         settings=sharedSettings??ReadSettings();
         Theme.Apply(settings.ThemeMode);
         Migrate(settings);
+        WidgetPaint.Apply(settings.WidgetColor);
         surface = new Border { Background = new SolidColorBrush(Color.FromArgb(242, 32, 37, 49)), BorderBrush = new SolidColorBrush(Color.FromArgb(65,255,255,255)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(17), Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0), Child = panel };
         dockScroll.Content=panel;dockScroll.HorizontalScrollBarVisibility=ScrollBarVisibility.Hidden;dockScroll.VerticalScrollBarVisibility=ScrollBarVisibility.Hidden;surface.Child=null;dockScroll.PreviewMouseWheel+=(_,e)=>{if(panel.Orientation==Orientation.Horizontal)dockScroll.ScrollToHorizontalOffset(dockScroll.HorizontalOffset-e.Delta);else dockScroll.ScrollToVerticalOffset(dockScroll.VerticalOffset-e.Delta);e.Handled=true;};var dockLayers=new Grid{ClipToBounds=false};dockLayers.Children.Add(surface);dockLayers.Children.Add(shimmer);dockLayers.Children.Add(dockScroll);dockLayers.Children.Add(reflection);Content = dockLayers;
         previewTimer.Tick += (_, _) => { previewTimer.Stop(); ShowPreview(); };
@@ -273,6 +281,11 @@ public partial class MainWindow : Window
         settings.HoverScale = Valid(settings.HoverScale,1,2.5,1.9);
         settings.CornerRadius = Valid(settings.CornerRadius,0,32,18);
         settings.WidgetIntervalSeconds = (int)Valid(settings.WidgetIntervalSeconds,1,3600,15);
+        if (string.IsNullOrWhiteSpace(settings.WidgetColor) || !System.Text.RegularExpressions.Regex.IsMatch(settings.WidgetColor.Trim(), "^#[0-9A-Fa-f]{6}$")) settings.WidgetColor = "#FFFFFF";
+        settings.WidgetColor = settings.WidgetColor.Trim().ToUpperInvariant();
+        settings.ScreenshotHotkey = NormalizeFnKey(settings.ScreenshotHotkey, "F1");
+        settings.PinHotkey = NormalizeFnKey(settings.PinHotkey, "F3");
+        if (settings.ScreenshotHotkey == settings.PinHotkey) settings.PinHotkey = "F3"; // 双键同键时保留截图键，贴图回落默认
         settings.DockOffset = double.IsFinite(settings.DockOffset) ? settings.DockOffset : 0;
         settings.DockLift = double.IsFinite(settings.DockLift) && settings.DockLift > 0 ? settings.DockLift : 0;
         settings.ReflectionRatio = double.IsFinite(settings.ReflectionRatio) ? Math.Clamp(settings.ReflectionRatio,0,1) : 0;
@@ -285,6 +298,11 @@ public partial class MainWindow : Window
         settings.LaunchEffectColor = settings.LaunchEffectColor is "Custom" or "HotTrack" ? settings.LaunchEffectColor : "None";
         settings.LaunchEffectColorHex = string.IsNullOrWhiteSpace(settings.LaunchEffectColorHex) ? "#5AA8FF" : settings.LaunchEffectColorHex;
         settings.SchemaVersion = 2;
+        static string NormalizeFnKey(string key,string fallback)
+        {
+            key=(key??"").Trim().ToUpperInvariant();
+            return System.Text.RegularExpressions.Regex.IsMatch(key, "^F([1-9]|1[0-2])$") ? key : fallback;
+        }
         static void FixNames(List<Entry> entries)
         {
             for (int index = 0; index < entries.Count; index++)

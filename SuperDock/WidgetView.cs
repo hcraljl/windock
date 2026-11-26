@@ -12,12 +12,12 @@ internal sealed class WidgetView : Border
     readonly CancellationTokenSource cancel=new();
     PerformanceMonitor? monitor;
     bool active,busy;
-    readonly TextBlock summary=new(){Foreground=Brushes.White,FontSize=12};
+    readonly TextBlock summary=new(){Foreground=WidgetPaint.Label,FontSize=12};
     readonly Dictionary<string,(TextBlock Text,ProgressBar? Bar)> values=new();
     public WidgetView(MainWindow.Settings settings,bool performance,bool compact=false)
     {
         this.settings=settings;this.performance=performance;this.compact=compact;
-        CornerRadius=new CornerRadius(14);Background=new SolidColorBrush(Color.FromArgb(18,255,255,255));Padding=new Thickness(compact?8:20);Margin=new Thickness(compact?4:0,0,compact?4:0,compact?0:12);
+        CornerRadius=new CornerRadius(14);Background=WidgetPaint.Tint(.07);Padding=new Thickness(compact?8:20);Margin=new Thickness(compact?4:0,0,compact?4:0,compact?0:12);
         Child=body;
         if(compact){Width=performance?100:110;body.Children.Add(summary);Cursor=System.Windows.Input.Cursors.Hand;MouseLeftButtonUp+=(_,_)=>OpenDetails();}
         else

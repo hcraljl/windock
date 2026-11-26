@@ -7,12 +7,12 @@ using System.Windows.Threading;
 namespace SuperDock;
 internal sealed class InfoWidget : Border
 {
-    readonly TextBlock label=new(){Foreground=Brushes.White,FontSize=12};
+    readonly TextBlock label=new(){Foreground=WidgetPaint.Label,FontSize=12};
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromSeconds(15)};
     readonly bool storage;
     public InfoWidget(bool storage)
     {
-        this.storage=storage;timer.Interval=TimeSpan.FromSeconds(storage?15:1);Width=110;CornerRadius=new CornerRadius(12);Background=new SolidColorBrush(Color.FromArgb(18,255,255,255));Padding=new Thickness(8);Margin=new Thickness(4,0,4,0);Child=label;Cursor=System.Windows.Input.Cursors.Hand;
+        this.storage=storage;timer.Interval=TimeSpan.FromSeconds(storage?15:1);Width=110;CornerRadius=new CornerRadius(12);Background=WidgetPaint.Tint(.07);Padding=new Thickness(8);Margin=new Thickness(4,0,4,0);Child=label;Cursor=System.Windows.Input.Cursors.Hand;
         ToolTip=storage?"系统磁盘 · 点击打开存储设置":"时钟与日历";
         timer.Tick+=(_,_)=>Update();Loaded+=(_,_)=>{Update();timer.Start();};Unloaded+=(_,_)=>timer.Stop();MouseLeftButtonUp+=(_,_)=>Open();
     }
