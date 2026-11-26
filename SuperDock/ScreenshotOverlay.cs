@@ -65,7 +65,7 @@ sealed class CaptureWindow : Window
         }
         root.Children.Add(frame);root.Children.Add(layer);root.Children.Add(chrome);
         layer.Visibility=Visibility.Hidden; // 完成框选前不响应标注
-        layer.MosaicProvider=rect=>AnnotationLayer.Pixelate(screen,new Rect(rect.Left*dpiX,rect.Top*dpiY,rect.Width*dpiX,rect.Height*dpiY));
+        layer.MosaicProvider=rect=>AnnotationLayer.Pixelate(screen,new Rect(rect.Left*dpiX,rect.Top*dpiY,rect.Width*dpiX,rect.Height*dpiY),layer.MosaicStrength);
         Content=root;
         // 截图支持跨屏：覆盖层与冻结帧覆盖整个虚拟桌面（所有显示器拼接）。
         screen=CaptureScreen(out var capturedArea,out dpiX,out dpiY);area=capturedArea;
@@ -230,14 +230,47 @@ sealed class CaptureWindow : Window
     {
         if(toolbar==null)
         {
-            var pin=AnnotationToolbar.ActionChip("\uE718","贴到桌面置顶显示",PinCurrent);
-            var save=AnnotationToolbar.ActionChip("\uE8B7","保存为 PNG 文件",SaveSelection);
-            var cancel=AnnotationToolbar.ActionChip("\uE711","退出本次截图",Close);
-            var done=AnnotationToolbar.ActionChip("\uE73E","完成并复制（结束后截图）",CopySelection);
-            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,pin,save,cancel,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
+            var pin=AnnotationToolbar.ActionChip("\uE718","贴到屏幕",PinCurrent);
+            var scroll=AnnotationToolbar.ActionChip("\uE8C6","滚动截图",()=>GlassDialog.Show("滚动截图功能即将上线，敬请期待"));
+            var extract=AnnotationToolbar.ActionChip(AnnotationToolbar.ScanIcon(),"提取文字",ExtractText);
+            var save=AnnotationToolbar.ActionChip("\uE719","保存",SaveSelection);
+            var cancel=AnnotationToolbar.ActionChip("\uE711","退出",Close,new SolidColorBrush(Color.FromRgb(229,72,77)));
+            var done=AnnotationToolbar.ActionChip("\uE73E","复制",CopySelection,new SolidColorBrush(Color.FromRgb(46,164,90)));
+            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,OnGripDrag,3,pin,scroll,extract,AnnotationToolbar.Separator(),save,cancel,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
             chrome.Children.Add(toolbar);
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;
+    }
+    // 手柄拖动：移动工具条位置（限制在窗口内）。
+    void OnGripDrag(Vector v)
+    {
+        if(toolbar==null)return;
+        double l=Canvas.GetLeft(toolbar)+v.X,t=Canvas.GetTop(toolbar)+v.Y;
+        if(double.IsNaN(l))l=0;if(double.IsNaN(t))t=0;
+        l=Math.Clamp(l,4,Math.Max(4,Width-toolbar.ActualWidth-4));
+        t=Math.Clamp(t,4,Math.Max(4,Height-toolbar.ActualHeight-4));
+        Canvas.SetLeft(toolbar,l);Canvas.SetTop(toolbar,t);
+    }
+    internal void OnToolbarLayoutChanged()=>PlaceToolbar();
+    // 提取文字：对选区做 OCR（优先 Umi-OCR），结果窗口可复制。
+    bool extracting;
+    void ExtractText()
+    {
+        if(extracting)return;extracting=true;
+        sizeLabel.Text="正在提取文字…";sizeLabel.Visibility=Visibility.Visible;
+        Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));
+        var image=Compose();
+        _=ExtractTextAsync(image);
+    }
+    async System.Threading.Tasks.Task ExtractTextAsync(BitmapSource image)
+    {
+        var (text,ok)=await Translation.RecognizeAsync(settings,image);
+        extracting=false;
+        await Dispatcher.BeginInvoke(new Action(()=>{
+            sizeLabel.Visibility=Visibility.Hidden;
+            if(!ok||string.IsNullOrWhiteSpace(text))GlassDialog.Show("未识别到文字，请框选包含文字的区域");
+            else ExtractTextWindow.Show(text.Trim(),this,selection);
+        }));
     }
     void PlaceToolbar()
     {

@@ -9,11 +9,16 @@ namespace SuperDock;
 // 坐标即宿主窗口的逻辑坐标；绘制期间鼠标被捕获，松手提交一个图元。
 internal sealed class AnnotationLayer : Canvas
 {
-    public enum Tool { None, Pen, Rect, Ellipse, Arrow, Mosaic, Text }
+    public enum Tool { None, Pen, Rect, Ellipse, Arrow, Mosaic, Text, Watermark }
     Tool current=Tool.None;Color color=Color.FromRgb(255,90,90);double strokeWidth=3;
     public Tool Current{get=>current;set{current=value;Changed?.Invoke();}}
     public Color Color{get=>color;set{color=value;ColorChanged?.Invoke();}}
     public double StrokeWidth{get=>strokeWidth;set{strokeWidth=value;ColorChanged?.Invoke();}}
+    // 文本字号、水印内容与透明度、马赛克强度（由工具条选项行调节）。
+    public double FontSize{get;set;}=16;
+    public int MosaicStrength{get;set;}=14;
+    public string WatermarkText{get;set;}="windock";
+    public double WatermarkOpacity{get;set;}=.35;
     public event Action? Changed;
     public event Action? ColorChanged;
     public bool IsTyping=>typing!=null;
@@ -32,6 +37,7 @@ internal sealed class AnnotationLayer : Canvas
         var point=e.GetPosition(this);
         if(Current==Tool.None){e.Handled=false;return;}
         if(Current==Tool.Text){BeginText(point);e.Handled=true;return;}
+        if(Current==Tool.Watermark){CommitTyping();StampWatermark(point);e.Handled=true;return;}
         CommitTyping();CaptureMouse();start=point;
         Brush stroke=Stroke(Color);double w=StrokeWidth;
         active=Current switch
@@ -95,10 +101,16 @@ internal sealed class AnnotationLayer : Canvas
         if(empty)Children.Remove(active);else{history.Add(active);Changed?.Invoke();}
         active=null;e.Handled=true;
     }
+    void StampWatermark(Point point)
+    {
+        var stamp=new TextBlock{Text=WatermarkText.Length==0?"windock":WatermarkText,Foreground=new SolidColorBrush(Color.FromRgb(110,116,124)),Opacity=WatermarkOpacity,FontSize=26,FontWeight=FontWeights.SemiBold};
+        SetLeft(stamp,point.X);SetTop(stamp,point.Y-14);
+        Children.Add(stamp);history.Add(stamp);Changed?.Invoke();
+    }
     void BeginText(Point point)
     {
         CommitTyping();
-        var box=new TextBox{MinWidth=60,Background=Brushes.Transparent,BorderBrush=new SolidColorBrush(Color.FromArgb(140,255,255,255)),BorderThickness=new Thickness(0,0,0,1),Foreground=Stroke(Color),FontSize=18,FontWeight=FontWeights.SemiBold,CaretBrush=Stroke(Color),Padding=new Thickness(2)};
+        var box=new TextBox{MinWidth=60,Background=Brushes.Transparent,BorderBrush=new SolidColorBrush(Color.FromArgb(140,255,255,255)),BorderThickness=new Thickness(0,0,0,1),Foreground=Stroke(Color),FontSize=FontSize,FontWeight=FontWeights.SemiBold,CaretBrush=Stroke(Color),Padding=new Thickness(2)};
         SetLeft(box,point.X);SetTop(box,point.Y-11);Children.Add(box);box.Focus();
         var editor=new TextEditor{Box=box,Pos=point};
         typing=editor;
@@ -127,7 +139,7 @@ internal sealed class AnnotationLayer : Canvas
         geometry.Freeze();return geometry;
     }
     // 马赛克生成：物理像素区域 → 降采样再最近邻放大，得到打码位图。
-    internal static ImageSource? Pixelate(BitmapSource source,Rect physical)
+    internal static ImageSource? Pixelate(BitmapSource source,Rect physical,int strength=14)
     {
         int x=(int)Math.Round(physical.Left),y=(int)Math.Round(physical.Top),w=(int)Math.Round(physical.Width),h=(int)Math.Round(physical.Height);
         x=Math.Max(0,Math.Min(x,source.PixelWidth-4));y=Math.Max(0,Math.Min(y,source.PixelHeight-4));
@@ -135,7 +147,7 @@ internal sealed class AnnotationLayer : Canvas
         try
         {
             var crop=new CroppedBitmap(source,new Int32Rect(x,y,w,h));
-            int block=Math.Max(10,Math.Min(w,h)/14);
+            int block=Math.Max(6,Math.Min(w,h)/Math.Max(1,strength));
             int sw=Math.Max(1,w/block),sh=Math.Max(1,h/block);
             var downX=new ScaleTransform((double)sw/w,(double)sh/h);downX.Freeze();
             var down=new TransformedBitmap(crop,downX);down.Freeze();

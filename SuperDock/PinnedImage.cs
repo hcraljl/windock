@@ -25,7 +25,7 @@ sealed class PinnedImage : Window
         layer.MosaicProvider=rect=>{
             var source=(BitmapSource)image.Source;
             double k=source.PixelWidth/Math.Max(1,image.ActualWidth);
-            return AnnotationLayer.Pixelate(source,new Rect(rect.X*k,rect.Y*k,rect.Width*k,rect.Height*k));
+            return AnnotationLayer.Pixelate(source,new Rect(rect.X*k,rect.Y*k,rect.Width*k,rect.Height*k),layer.MosaicStrength);
         };
         root.Children.Add(frame);root.Children.Add(layer);
         Content=root;
@@ -98,13 +98,30 @@ sealed class PinnedImage : Window
         if(toolbar==null)
         {
             var done=AnnotationToolbar.ActionChip("","标注完成",()=>ToggleAnnotate());
-            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=14,ShadowDepth=3,Opacity=.3}};
+            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,OnGripDrag,0,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=14,ShadowDepth=3,Opacity=.3}};
             var host=new Canvas{Width=image.ActualWidth,Height=image.ActualHeight};
             Canvas.SetLeft(toolbar,4);Canvas.SetTop(toolbar,4);
             host.Children.Add(toolbar);
             root.Children.Add(host);
         }
         toolbar.Visibility=Visibility.Visible;
+    }
+    // 手柄拖动：移动标注工具条（限制在图片范围内）。
+    void OnGripDrag(Vector v)
+    {
+        if(toolbar==null||toolbar.Parent is not Canvas hostCanvas)return;
+        double l=Canvas.GetLeft(toolbar)+v.X,t=Canvas.GetTop(toolbar)+v.Y;
+        l=Math.Clamp(l,2,Math.Max(2,image.ActualWidth-toolbar.ActualWidth-2));
+        t=Math.Clamp(t,2,Math.Max(2,image.ActualHeight-toolbar.ActualHeight-2));
+        Canvas.SetLeft(toolbar,l);Canvas.SetTop(toolbar,t);
+    }
+    internal void OnToolbarLayoutChanged()
+    {
+        if(toolbar!=null&&toolbar.Parent is Canvas hc)
+        {
+            Canvas.SetLeft(toolbar,Math.Clamp(Canvas.GetLeft(toolbar),2,Math.Max(2,image.ActualWidth-toolbar.ActualWidth-2)));
+            Canvas.SetTop(toolbar,Math.Clamp(Canvas.GetTop(toolbar),2,Math.Max(2,image.ActualHeight-toolbar.ActualHeight-2)));
+        }
     }
     static Button SmallButton(string label,string tip,Action action)
     {
