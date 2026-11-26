@@ -75,13 +75,13 @@ sealed class CaptureWindow : Window
             // 遮罩是 Canvas 内的 Border，必须显式设定尺寸（Canvas 不拉伸子元素），否则永远不会渲染。
             dim.Width=Width;dim.Height=Height;};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
-        PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
+        PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}else if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
         PreviewMouseLeftButtonDown+=(_,e)=>{if(selected&&!InSelection(e.GetPosition(root))&&!OverChrome(e,chrome))BeginSelect(e.GetPosition(root));};
         // 选区二次调整与整体拖动：靠近边缘/角拖动可拉大拉小；未选标注工具时按住选区内部可整框拖动（默认提供，不单独列按钮）。
         PreviewMouseLeftButtonDown+=(_,e)=>{if(!selected||selecting||OverChrome(e,chrome))return;var p=e.GetPosition(root);
             var edge=EdgeHit(p);
             if(edge!=ResizeEdge.None){StartResize(edge,p);e.Handled=true;return;}
-            if(layer.Current==AnnotationLayer.Tool.None&&InSelection(p)&&selection.Width>0){StartMove(p);e.Handled=true;}};
+            if(layer.Current==AnnotationLayer.Tool.None&&InSelection(p)&&selection.Width>0&&layer.ShapeAt(p)==null){StartMove(p);e.Handled=true;}};
         // 右键取消：不进入框选、不弹菜单，直接退出截图状态。
         PreviewMouseRightButtonDown+=(_,e)=>{e.Handled=true;Close();};
         MouseRightButtonDown+=(_,e)=>e.Handled=true;
@@ -230,13 +230,20 @@ sealed class CaptureWindow : Window
     {
         if(toolbar==null)
         {
+            StackPanel toolbarRow=null!;
             var pin=AnnotationToolbar.ActionChip("\uE718","贴到屏幕",PinCurrent);
-            var scroll=AnnotationToolbar.ActionChip("\uE8C6","滚动截图",()=>GlassDialog.Show("滚动截图功能即将上线，敬请期待"));
-            var extract=AnnotationToolbar.ActionChip(AnnotationToolbar.ScanIcon(),"提取文字",ExtractText);
+            var scroll=AnnotationToolbar.ActionChip("\uE8C6","滚动截图",()=>{
+                // 选项子行显示“开始滚动”按钮；点击后自动向下滚动并拼接长图
+                var start=new Border{Background=new SolidColorBrush(Color.FromRgb(35,125,245)),CornerRadius=new CornerRadius(13),Height=26,Padding=new Thickness(14,0,14,0),Cursor=Cursors.Hand,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,2,0,0),Child=new StackPanel{Orientation=Orientation.Horizontal,Children={new TextBlock{Text="\uE768",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center},new TextBlock{Text=" 开始滚动",FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center}}},ToolTip="开始滚动截图"};
+                start.MouseEnter+=(_,_)=>start.Opacity=.85;start.MouseLeave+=(_,_)=>start.Opacity=1;
+                start.MouseLeftButtonUp+=(_,_)=>StartScrollCapture();
+                AnnotationToolbar.SetOptions(toolbarRow,start);
+            });
             var save=AnnotationToolbar.ActionChip("\uE719","保存",SaveSelection);
             var cancel=AnnotationToolbar.ActionChip("\uE711","退出",Close,new SolidColorBrush(Color.FromRgb(229,72,77)));
             var done=AnnotationToolbar.ActionChip("\uE73E","复制",CopySelection,new SolidColorBrush(Color.FromRgb(46,164,90)));
-            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=AnnotationToolbar.Build(layer,this,OnGripDrag,3,pin,scroll,extract,AnnotationToolbar.Separator(),save,cancel,done),Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
+            toolbarRow=(StackPanel)AnnotationToolbar.Build(layer,this,OnGripDrag,2,pin,scroll,save,cancel,done);
+            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=toolbarRow,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
             chrome.Children.Add(toolbar);
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;
@@ -252,25 +259,14 @@ sealed class CaptureWindow : Window
         Canvas.SetLeft(toolbar,l);Canvas.SetTop(toolbar,t);
     }
     internal void OnToolbarLayoutChanged()=>PlaceToolbar();
-    // 提取文字：对选区做 OCR（优先 Umi-OCR），结果窗口可复制。
-    bool extracting;
-    void ExtractText()
+    // 滚动截图：把选区屏幕物理位置交给 ScrollCapture（覆盖层先关闭，露出下方内容）。
+    void StartScrollCapture()
     {
-        if(extracting)return;extracting=true;
-        sizeLabel.Text="正在提取文字…";sizeLabel.Visibility=Visibility.Visible;
-        Canvas.SetLeft(sizeLabel,selection.Left);Canvas.SetTop(sizeLabel,Math.Max(0,selection.Top-26));
-        var image=Compose();
-        _=ExtractTextAsync(image);
-    }
-    async System.Threading.Tasks.Task ExtractTextAsync(BitmapSource image)
-    {
-        var (text,ok)=await Translation.RecognizeAsync(settings,image);
-        extracting=false;
-        await Dispatcher.BeginInvoke(new Action(()=>{
-            sizeLabel.Visibility=Visibility.Hidden;
-            if(!ok||string.IsNullOrWhiteSpace(text))GlassDialog.Show("未识别到文字，请框选包含文字的区域");
-            else ExtractTextWindow.Show(text.Trim(),this,selection);
-        }));
+        var origin=PointToScreen(new Point(selection.Left,selection.Top));
+        var dpi=VisualTreeHelper.GetDpi(this);
+        var phys=new Rect(origin.X,origin.Y,selection.Width*dpi.DpiScaleX,selection.Height*dpi.DpiScaleY);
+        Close();
+        ScrollCapture.Run(phys,settings);
     }
     void PlaceToolbar()
     {
@@ -291,6 +287,7 @@ sealed class CaptureWindow : Window
         crop.Width=Math.Max(1,Math.Min(crop.Width,screen.PixelWidth-crop.X));crop.Height=Math.Max(1,Math.Min(crop.Height,screen.PixelHeight-crop.Y));
         var rtb=new RenderTargetBitmap(crop.Width,crop.Height,96,96,PixelFormats.Pbgra32);
         var visual=new DrawingVisual();
+        layer.SuppressOverlay=true; // 选择框不进入成图
         using(var ctx=visual.RenderOpen())
         {
             ctx.DrawImage(new CroppedBitmap(screen,crop),new Rect(0,0,crop.Width,crop.Height));
@@ -340,7 +337,13 @@ sealed class CaptureWindow : Window
     }
     public void PinCurrent()
     {
-        try{var image=Compose();Close();PinnedImage.Pin(image,settings);}
+        try
+        {
+            var image=Compose();
+            // 原位贴图：贴图窗口出现在选区位置（覆盖层坐标即选区坐标系）
+            var at=new Rect(Left+selection.Left,Top+selection.Top,selection.Width,selection.Height);
+            Close();PinnedImage.Pin(image,settings,at);
+        }
         catch(Exception ex)when(ex is System.Runtime.InteropServices.COMException){GlassDialog.Show("贴图失败："+ex.Message);}
     }
     // 截取整个虚拟桌面（所有显示器）的物理像素（GDI BitBlt，避免引入 WinForms）。

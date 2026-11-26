@@ -5,7 +5,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 namespace SuperDock;
-// 截图与贴图共用的标注画布：涂鸦（自由画笔）、矩形、椭圆、箭头、马赛克、文字，支持撤销与清空。
+// 截图与贴图共用的标注画布：涂鸦（自由画笔）、矩形、椭圆、箭头、马赛克、文字、水印，
+// 支持撤销与清空；矩形/椭圆/箭头可再次点击选中，拖动移动、拖手柄缩放。
 // 坐标即宿主窗口的逻辑坐标；绘制期间鼠标被捕获，松手提交一个图元。
 internal sealed class AnnotationLayer : Canvas
 {
@@ -14,30 +15,203 @@ internal sealed class AnnotationLayer : Canvas
     public Tool Current{get=>current;set{current=value;Changed?.Invoke();}}
     public Color Color{get=>color;set{color=value;ColorChanged?.Invoke();}}
     public double StrokeWidth{get=>strokeWidth;set{strokeWidth=value;ColorChanged?.Invoke();}}
-    // 文本字号、水印内容与透明度、马赛克强度（由工具条选项行调节）。
+    // 文本字号、水印样式、马赛克强度（由工具条选项行调节）。
     public double FontSize{get;set;}=16;
     public int MosaicStrength{get;set;}=14;
-    public string WatermarkText{get;set;}="windock";
-    public double WatermarkOpacity{get;set;}=.35;
+    public string WatermarkText{get;set;}="";
+    public Color WatermarkColor{get;set;}=Color.FromRgb(90,98,108);
+    public double WatermarkOpacity{get;set;}=.45;
     public event Action? Changed;
     public event Action? ColorChanged;
     public bool IsTyping=>typing!=null;
-    public bool HasDrawings=>Children.Count>0;
+    public bool HasDrawings=>Children.OfType<UIElement>().Any(c=>!ReferenceEquals(c,overlay));
     // 马赛克由宿主提供像素源：给定逻辑区域返回马赛克化后的位图（截图=冻结帧区域；贴图=图片对应区域）。
     public Func<Rect,ImageSource?>? MosaicProvider {get;set;}
     readonly List<UIElement> history=[];
     Point start;UIElement? active;TextEditor? typing;
     sealed class TextEditor{public TextBox Box=null!;public Point Pos;}
-    public AnnotationLayer(){Background=Brushes.Transparent;Focusable=false;}
+    // 图形选择：修饰层（虚线框+8 手柄）挂在画布顶层，IsHitTestVisible=false，不参与绘制与撤销。
+    readonly Canvas overlay=new(){IsHitTestVisible=false,Visibility=Visibility.Collapsed};
+    readonly Rectangle shapeBorder=new(){Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.4,StrokeDashArray=new DoubleCollection{4,3},Fill=Brushes.Transparent};
+    readonly List<Ellipse> shapeHandles=new();
+    public UIElement? SelectedShape{get;private set;}
+    public AnnotationLayer()
+    {
+        Background=Brushes.Transparent;Focusable=false;
+        overlay.Children.Add(shapeBorder);
+        for(int i=0;i<8;i++)
+        {
+            var handle=new Ellipse{Width=8,Height=8,Fill=Brushes.White,Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.3};
+            shapeHandles.Add(handle);overlay.Children.Add(handle);
+        }
+        Children.Add(overlay); // 置于最底层占位；渲染时提到顶层
+    }
+    public bool SuppressOverlay{set=>overlay.Visibility=value?Visibility.Collapsed:SelectedShape==null?Visibility.Collapsed:Visibility.Visible;}
     static Brush Stroke(Color color)=>new SolidColorBrush(color){Opacity=.95};
-    public void Undo(){if(Children.Count==0)return;var last=Children[^1];Children.Remove(last);history.Remove(last);Changed?.Invoke();}
-    public void ClearAll(){Children.Clear();history.Clear();Changed?.Invoke();}
+    // 修饰层置顶：新图元加入后把它移到最后（最上层）。
+    void RaiseOverlay()
+    {
+        if(Children.Count>0&&ReferenceEquals(Children[Children.Count-1],overlay))return;
+        Children.Remove(overlay);Children.Add(overlay);
+    }
+    public void Undo()
+    {
+        for(int i=Children.Count-1;i>=0;i--)
+        {
+            var child=Children[i];
+            if(ReferenceEquals(child,overlay))continue;
+            Children.Remove(child);history.Remove(child);
+            if(ReferenceEquals(child,SelectedShape))Deselect();
+            Changed?.Invoke();return;
+        }
+    }
+    public void ClearAll(){Deselect();for(int i=Children.Count-1;i>=0;i--)if(!ReferenceEquals(Children[i],overlay))Children.RemoveAt(i);history.Clear();Changed?.Invoke();}
+    // —— 图形选中/移动/缩放 ——
+    static Rect BoundsOf(UIElement el)=>el switch
+    {
+        Rectangle r=>new Rect(GetLeft(r),GetTop(r),r.Width,r.Height),
+        Ellipse e=>new Rect(GetLeft(e),GetTop(e),e.Width,e.Height),
+        Image i=>new Rect(GetLeft(i),GetTop(i),i.Width,i.Height),
+        TextBlock t=>new Rect(GetLeft(t),GetTop(t),t.ActualWidth,t.ActualHeight),
+        Path p=>p.Data is null?Rect.Empty:new Rect(GetLeft(p)+p.Data.Bounds.X,GetTop(p)+p.Data.Bounds.Y,p.Data.Bounds.Width,p.Data.Bounds.Height),
+        _=>Rect.Empty
+    };
+    // 可再次点击选中的图形：矩形 / 椭圆 / 箭头（用户指定范围）。
+    static bool Selectable(UIElement el)=>el switch
+    {
+        Rectangle{Tag:"mosaic"}=>false,
+        Rectangle or Ellipse=>true,
+        Path p=>p.Data!=null&&!p.Data.Bounds.IsEmpty&&p.Data.Bounds.Width>2&&p.Data.Bounds.Height>2,
+        _=>false
+    };
+    public UIElement? ShapeAt(Point point)
+    {
+        for(int i=Children.Count-1;i>=0;i--)
+        {
+            var el=Children[i];
+            if(ReferenceEquals(el,overlay)||!Selectable(el))continue;
+            var bounds=BoundsOf(el);
+            if(bounds.IsEmpty)continue;
+            bounds.Inflate(3,3);
+            if(bounds.Contains(point))return el;
+        }
+        return null;
+    }
+    void Select(UIElement el)
+    {
+        SelectedShape=el;
+        RaiseOverlay();
+        overlay.Visibility=Visibility.Visible;
+        RefreshShapeOverlay();
+        Changed?.Invoke();
+    }
+    public void Deselect()
+    {
+        if(SelectedShape==null)return;
+        SelectedShape=null;
+        overlay.Visibility=Visibility.Collapsed;
+        Changed?.Invoke();
+    }
+    void RefreshShapeOverlay()
+    {
+        if(SelectedShape==null)return;
+        var bounds=BoundsOf(SelectedShape);
+        if(bounds.IsEmpty){Deselect();return;}
+        bounds.Inflate(6,6);
+        Canvas.SetLeft(shapeBorder,bounds.Left);Canvas.SetTop(shapeBorder,bounds.Top);
+        shapeBorder.Width=Math.Max(0,bounds.Width);shapeBorder.Height=Math.Max(0,bounds.Height);
+        var points=new[]
+        {
+            new Point(bounds.Left,bounds.Top),new Point(bounds.Left+bounds.Width/2,bounds.Top),new Point(bounds.Right,bounds.Top),
+            new Point(bounds.Left,bounds.Top+bounds.Height/2),new Point(bounds.Right,bounds.Top+bounds.Height/2),
+            new Point(bounds.Left,bounds.Bottom),new Point(bounds.Left+bounds.Width/2,bounds.Bottom),new Point(bounds.Right,bounds.Bottom)
+        };
+        for(int i=0;i<shapeHandles.Count&&i<points.Length;i++)
+        {
+            Canvas.SetLeft(shapeHandles[i],points[i].X-4);Canvas.SetTop(shapeHandles[i],points[i].Y-4);
+            shapeHandles[i].Visibility=shapeBorder.Width>18||shapeBorder.Height>18?Visibility.Visible:Visibility.Collapsed;
+        }
+    }
+    // 手柄命中：返回 0..7（角/边），未命中 -1。与外部选区手柄布局一致。
+    int HandleHit(Point point)
+    {
+        if(SelectedShape==null)return -1;
+        var bounds=BoundsOf(SelectedShape);if(bounds.IsEmpty)return -1;
+        bounds.Inflate(6,6);
+        var points=new[]
+        {
+            new Point(bounds.Left,bounds.Top),new Point(bounds.Left+bounds.Width/2,bounds.Top),new Point(bounds.Right,bounds.Top),
+            new Point(bounds.Left,bounds.Top+bounds.Height/2),new Point(bounds.Right,bounds.Top+bounds.Height/2),
+            new Point(bounds.Left,bounds.Bottom),new Point(bounds.Left+bounds.Width/2,bounds.Bottom),new Point(bounds.Right,bounds.Bottom)
+        };
+        for(int i=0;i<points.Length;i++)if((point-points[i]).Length<=7)return i;
+        return -1;
+    }
+    int shapeHandle=-1;Point shapeStart;Rect shapeStartBounds;Point[] shapeArrowFromTo=null!;
+    void BeginShapeDrag(UIElement el,int handle,Point point)
+    {
+        CommitTyping();
+        if(!ReferenceEquals(el,SelectedShape))Select(el);
+        shapeHandle=handle;shapeStart=point;shapeStartBounds=BoundsOf(el);
+        shapeDragActive=true;
+        if(el is Path{Tag:Point[] ft})shapeArrowFromTo=ft;
+        CaptureMouse();
+    }
+    void ApplyShapeDrag(Point point)
+    {
+        var el=SelectedShape;if(el==null)return;
+        var d=point-shapeStart;
+        if(shapeHandle<0) // 移动
+        {
+            switch(el)
+            {
+                case Rectangle r:SetLeft(r,shapeStartBounds.Left+d.X);SetTop(r,shapeStartBounds.Top+d.Y);break;
+                case Ellipse e:SetLeft(e,shapeStartBounds.Left+d.X);SetTop(e,shapeStartBounds.Top+d.Y);break;
+                case Path a when shapeArrowFromTo!=null:
+                    a.Tag=new[]{shapeArrowFromTo[0]+d,shapeArrowFromTo[1]+d};
+                    a.Data=ArrowGeometry(shapeArrowFromTo[0]+d,shapeArrowFromTo[1]+d,ArrowHead(a));break;
+                default:return;
+            }
+        }
+        else // 缩放：手柄拖到哪，边界到哪
+        {
+            double l=shapeStartBounds.Left,r=shapeStartBounds.Right,t=shapeStartBounds.Top,b=shapeStartBounds.Bottom;
+            if(shapeHandle is 0 or 3 or 5)l=Math.Min(point.X,r-8); // W
+            if(shapeHandle is 2 or 4 or 7)r=Math.Max(point.X,l+8); // E
+            if(shapeHandle is 0 or 1 or 2)t=Math.Min(point.Y,b-8); // N
+            if(shapeHandle is 5 or 6 or 7)b=Math.Max(point.Y,t+8); // S
+            if(r-l<8||b-t<8)return;
+            var target=new Rect(l,t,r-l,b-t);
+            switch(el)
+            {
+                case Rectangle rect:SetLeft(rect,target.Left);SetTop(rect,target.Top);rect.Width=target.Width;rect.Height=target.Height;break;
+                case Ellipse e:SetLeft(e,target.Left);SetTop(e,target.Top);e.Width=target.Width;e.Height=target.Height;break;
+                case Path a when shapeArrowFromTo!=null:
+                    var from=shapeStartBounds;var fx=target.Width/Math.Max(1,from.Width);var fy=target.Height/Math.Max(1,from.Height);
+                    var p0=new Point(target.X+(shapeArrowFromTo[0].X-from.X)*fx,target.Y+(shapeArrowFromTo[0].Y-from.Y)*fy);
+                    var p1=new Point(target.X+(shapeArrowFromTo[1].X-from.X)*fx,target.Y+(shapeArrowFromTo[1].Y-from.Y)*fy);
+                    a.Tag=new[]{p0,p1};a.Data=ArrowGeometry(p0,p1,ArrowHead(a));break;
+                default:return;
+            }
+        }
+        RefreshShapeOverlay();
+    }
+    static double ArrowHead(Path arrow)=>arrow.StrokeThickness>=1?Math.Max(12,arrow.StrokeThickness*4):16;
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         var point=e.GetPosition(this);
         if(Current==Tool.None){e.Handled=false;return;}
         if(Current==Tool.Text){BeginText(point);e.Handled=true;return;}
         if(Current==Tool.Watermark){CommitTyping();StampWatermark(point);e.Handled=true;return;}
+        // 已选中图形：优先命中手柄（缩放）与本体（移动）
+        if(SelectedShape!=null)
+        {
+            var handle=HandleHit(point);
+            if(handle>=0){BeginShapeDrag(SelectedShape,handle,point);e.Handled=true;return;}
+        }
+        var hit=ShapeAt(point);
+        if(hit!=null){BeginShapeDrag(hit,-1,point);e.Handled=true;return;}
+        if(SelectedShape!=null)Deselect(); // 点击空白开始新绘制前取消选择
         CommitTyping();CaptureMouse();start=point;
         Brush stroke=Stroke(Color);double w=StrokeWidth;
         active=Current switch
@@ -49,12 +223,24 @@ internal sealed class AnnotationLayer : Canvas
             Tool.Mosaic=>new Rectangle{Tag="mosaic",Stroke=new SolidColorBrush(Color.FromRgb(111,207,255)){Opacity=.9},StrokeThickness=1.2,StrokeDashArray=new DoubleCollection{3,2},Fill=Brushes.Transparent},
             _=>null
         };
-        if(active!=null){SetLeft(active,0);SetTop(active,0);Children.Add(active);}
+        if(active!=null){SetLeft(active,0);SetTop(active,0);Children.Add(active);RaiseOverlay();}
         e.Handled=true;
     }
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        if(active==null)return;var point=e.GetPosition(this);
+        if(shapeDragActive){ApplyShapeDrag(e.GetPosition(this));return;}
+        if(active==null)
+        {
+            // 光标提示：手柄=缩放，图形本体=移动
+            if(SelectedShape!=null)
+            {
+                var handle=HandleHit(e.GetPosition(this));
+                Cursor hc=handle switch{1 or 6=>Cursors.SizeNS,3 or 4=>Cursors.SizeWE,0 or 2=>Cursors.SizeNWSE,5 or 7=>Cursors.SizeNESW,_=>Cursors.Cross};
+                Cursor=handle>=0?hc:ShapeAt(e.GetPosition(this))!=null?Cursors.SizeAll:null;
+            }
+            return;
+        }
+        var point=e.GetPosition(this);
         double x=Math.Min(start.X,point.X),y=Math.Min(start.Y,point.Y),w=Math.Abs(point.X-start.X),h=Math.Abs(point.Y-start.Y);
         switch(active)
         {
@@ -68,8 +254,10 @@ internal sealed class AnnotationLayer : Canvas
             case Path arrow:arrow.Data=ArrowGeometry(start,point,Math.Max(12,StrokeWidth*4));break;
         }
     }
+    bool shapeDragActive;
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
+        if(shapeDragActive){shapeDragActive=false;shapeStartBounds=default;shapeHandle=-1;if(IsMouseCaptured)ReleaseMouseCapture();e.Handled=true;return;}
         if(active==null)return; // 文字工具的输入框保持可编辑，由 Enter/失焦/再次点击提交
         ReleaseMouseCapture();
         var point=e.GetPosition(this);
@@ -93,29 +281,42 @@ internal sealed class AnnotationLayer : Canvas
                     var mosaic=new Image{Source=source,Width=rect.Width,Height=rect.Height};
                     RenderOptions.SetBitmapScalingMode(mosaic,BitmapScalingMode.NearestNeighbor);
                     SetLeft(mosaic,rect.Left);SetTop(mosaic,rect.Top);
-                    Children.Add(mosaic);history.Add(mosaic);Changed?.Invoke();
+                    Children.Add(mosaic);history.Add(mosaic);RaiseOverlay();Changed?.Invoke();
                 }
             }
             active=null;e.Handled=true;return;
         }
-        if(empty)Children.Remove(active);else{history.Add(active);Changed?.Invoke();}
+        if(empty)Children.Remove(active);
+        else
+        {
+            history.Add(active);
+            if(active is Path arrow && arrow.Data!=null && !arrow.Data.Bounds.IsEmpty)arrow.Tag=new[]{start,point}; // 记录箭头端点，供选中拖动/缩放
+            Changed?.Invoke();
+        }
         active=null;e.Handled=true;
     }
     void StampWatermark(Point point)
     {
-        var stamp=new TextBlock{Text=WatermarkText.Length==0?"windock":WatermarkText,Foreground=new SolidColorBrush(Color.FromRgb(110,116,124)),Opacity=WatermarkOpacity,FontSize=26,FontWeight=FontWeights.SemiBold};
+        if(string.IsNullOrWhiteSpace(WatermarkText))return; // 未填写内容时不放置
+        var stamp=new TextBlock{Text=WatermarkText,Foreground=new SolidColorBrush(WatermarkColor),Opacity=WatermarkOpacity,FontSize=26,FontWeight=FontWeights.SemiBold};
         SetLeft(stamp,point.X);SetTop(stamp,point.Y-14);
-        Children.Add(stamp);history.Add(stamp);Changed?.Invoke();
+        Children.Add(stamp);history.Add(stamp);RaiseOverlay();Changed?.Invoke();
     }
     void BeginText(Point point)
     {
-        CommitTyping();
+        CommitTyping();Deselect();
         var box=new TextBox{MinWidth=60,Background=Brushes.Transparent,BorderBrush=new SolidColorBrush(Color.FromArgb(140,255,255,255)),BorderThickness=new Thickness(0,0,0,1),Foreground=Stroke(Color),FontSize=FontSize,FontWeight=FontWeights.SemiBold,CaretBrush=Stroke(Color),Padding=new Thickness(2)};
         SetLeft(box,point.X);SetTop(box,point.Y-11);Children.Add(box);box.Focus();
         var editor=new TextEditor{Box=box,Pos=point};
         typing=editor;
         box.KeyDown+=(_,ev)=>{if(ev.Key==Key.Enter){CommitTyping();ev.Handled=true;}else if(ev.Key==Key.Escape){Children.Remove(box);typing=null;ev.Handled=true;}};
         box.LostKeyboardFocus+=(_,_)=>CommitTyping();
+    }
+    // 字号实时生效：工具条调节时同步更新正在输入的文本框。
+    public void ApplyFontSize(double value)
+    {
+        FontSize=value;
+        if(typing!=null)typing.Box.FontSize=value;
     }
     public void CommitTyping()
     {

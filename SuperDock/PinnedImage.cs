@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -15,9 +16,10 @@ sealed class PinnedImage : Window
     readonly AnnotationLayer layer=new();
     Border? toolbar;
     double scale=1;bool alwaysTop=true;
-    PinnedImage(BitmapSource source,MainWindow.Settings settings)
+    readonly Rect? at;
+    PinnedImage(BitmapSource source,MainWindow.Settings settings,Rect? at=null)
     {
-        this.settings=settings;
+        this.settings=settings;this.at=at;
         WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;ShowActivated=false;Title="windock · 贴图";
         image=new Image{Source=source,Stretch=Stretch.Fill};RenderOptions.SetBitmapScalingMode(image,BitmapScalingMode.HighQuality);
         var frame=new Border{CornerRadius=new CornerRadius(6),Child=image,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=18,ShadowDepth=4,Opacity=.45,Color=Color.FromRgb(12,18,28)}};
@@ -33,6 +35,15 @@ sealed class PinnedImage : Window
         Loaded+=(_,_)=>{
             var dpi=VisualTreeHelper.GetDpi(this);
             image.Width=source.PixelWidth/dpi.DpiScaleX;image.Height=source.PixelHeight/dpi.DpiScaleY;
+            if(at!=null)
+            {
+                // 原位贴图：出现在指定屏幕位置（截图选区处），保证至少一部分在可视桌面上
+                Left=at.Value.Left;Top=at.Value.Top;
+                var vLeft=SystemParameters.VirtualScreenLeft;var vTop=SystemParameters.VirtualScreenTop;var vRight=vLeft+SystemParameters.VirtualScreenWidth;var vBottom=vTop+SystemParameters.VirtualScreenHeight;
+                if(Left+ActualWidth<vLeft+40)Left=vLeft+8;else if(Left>vRight-40)Left=vRight-ActualWidth-8;
+                if(Top+ActualHeight<vTop+40)Top=vTop+8;else if(Top>vBottom-40)Top=vBottom-ActualHeight-8;
+                return;
+            }
             if(DesktopIntegration.Cursor(out var cursor))
             {
                 var work=SystemParameters.WorkArea;
@@ -42,12 +53,70 @@ sealed class PinnedImage : Window
             }
             else WindowStartupLocation=WindowStartupLocation.CenterScreen;
         };
-        MouseLeftButtonDown+=(_,e)=>{if(e.ClickCount==2){Close();return;}if(e.ButtonState==MouseButtonState.Pressed)try{DragMove();}catch(InvalidOperationException){}};
+        // 手动拖动（DragMove 在贴图不抢焦点的场景下不稳定）：捕获鼠标，按屏幕偏移移动窗口。
+        bool dragging=false;Point dragOffset;
+        MouseLeftButtonDown+=(_,e)=>{
+            if(e.ClickCount==2){Close();return;}
+            if(e.ButtonState!=MouseButtonState.Pressed)return;
+            var p=e.GetPosition(this);var screen=new Point(Left+p.X,Top+p.Y);
+            dragging=true;dragOffset=new Point(screen.X-Left,screen.Y-Top);
+            CaptureMouse();e.Handled=true;
+        };
+        MouseMove+=(_,e)=>{
+            if(!dragging)return;
+            var p=e.GetPosition(this);var screen=new Point(Left+p.X,Top+p.Y);
+            Left=Math.Round(screen.X-dragOffset.X);Top=Math.Round(screen.Y-dragOffset.Y);
+        };
+        MouseLeftButtonUp+=(_,e)=>{if(dragging){dragging=false;ReleaseMouseCapture();}};
         MouseRightButtonUp+=(_,_)=>ShowMenu();
         PreviewMouseWheel+=(_,e)=>{Zoom(e.Delta>0?1.1:1/1.1);e.Handled=true;};
-        KeyDown+=(_,e)=>{if(e.Key==Key.Escape)Close();};
+        KeyDown+=(_,e)=>{if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}else if(e.Key==Key.Escape)Close();};
+        Loaded+=(_,_)=>{live.Add(this);EnsureHook();};
+        Closed+=(_,_)=>{live.Remove(this);if(live.Count==0)Unhook();};
         Deactivated+=(_,_)=>{layer.Current=AnnotationLayer.Tool.None;if(toolbar!=null)toolbar.Visibility=Visibility.Collapsed;};
     }
+    // 悬停滚轮缩放：Windows 默认把滚轮消息发给焦点窗口，贴图窗口不抢焦点，
+    // 因此用 WH_MOUSE_LL 钩子捕获悬停在贴图上的滚轮事件并转为缩放（吃掉事件，避免滚动到背后的页面）。
+    static readonly List<PinnedImage> live=[];
+    static IntPtr hook;static HookProc hookProc=null!;
+    delegate IntPtr HookProc(int code,IntPtr wParam,IntPtr lParam);
+    [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id,HookProc proc,IntPtr mod,uint thread);
+    [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook,int code,IntPtr wParam,IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] struct MsllHookStruct{public PointApi pt;public uint mouseData;public uint flags;public uint time;public UIntPtr extra;}
+    [StructLayout(LayoutKind.Sequential)] struct PointApi{public int X,Y;}
+    static void EnsureHook()
+    {
+        if(hook!=IntPtr.Zero)return;
+        hookProc=(code,wParam,lParam)=>{
+            const int WM_MOUSEWHEEL=0x020A;
+            if(code>=0&&wParam==(IntPtr)WM_MOUSEWHEEL)
+            {
+                var info=(MsllHookStruct)Marshal.PtrToStructure(lParam,typeof(MsllHookStruct))!;
+                var delta=(short)((info.mouseData>>16)&0xFFFF);
+                var pt=new Point(info.pt.X,info.pt.Y);
+                foreach(var window in live.ToList())
+                {
+                    try
+                    {
+                        if(!window.IsVisible)continue;
+                        var tl=window.PointToScreen(new Point(0,0));
+                        var br=window.PointToScreen(new Point(window.ActualWidth,window.ActualHeight));
+                        if(pt.X>=tl.X&&pt.X<=br.X&&pt.Y>=tl.Y&&pt.Y<=br.Y)
+                        {
+                            var target=window;var factor=delta>0?1.1:1/1.1;
+                            target.Dispatcher.BeginInvoke(new Action(()=>{try{target.Zoom(factor);}catch{}}));
+                            return (IntPtr)1; // 吃掉滚轮，避免穿透到背后的页面
+                        }
+                    }
+                    catch{}
+                }
+            }
+            return CallNextHookEx(hook,code,wParam,lParam);
+        };
+        hook=SetWindowsHookEx(14,hookProc,IntPtr.Zero,0); // WH_MOUSE_LL
+    }
+    static void Unhook(){if(hook!=IntPtr.Zero){UnhookWindowsHookEx(hook);hook=IntPtr.Zero;}}
     void Zoom(double factor)
     {
         if(layer.Visibility==Visibility.Visible)layer.CommitTyping();
@@ -151,9 +220,9 @@ sealed class PinnedImage : Window
         });
         thread.SetApartmentState(System.Threading.ApartmentState.STA);thread.IsBackground=true;thread.Start();
     }
-    internal static void Pin(BitmapSource source,MainWindow.Settings settings)
+    internal static void Pin(BitmapSource source,MainWindow.Settings settings,Rect? at=null)
     {
         if(source.CanFreeze&&!source.IsFrozen)source.Freeze();
-        new PinnedImage(source,settings).Show();
+        new PinnedImage(source,settings,at).Show();
     }
 }
