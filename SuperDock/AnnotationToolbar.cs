@@ -107,7 +107,7 @@ internal static class AnnotationToolbar
             panel.Children.Add(current);
             var slider=new Slider{Minimum=2,Maximum=8,Value=layer.StrokeWidth,Width=90,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0)};
             slider.ValueChanged+=(_,_)=>layer.StrokeWidth=slider.Value;
-            panel.Children.Add(slider);
+            panel.Children.Add(TrackWrap(slider));
             foreach(var(_,color) in Palette)
             {
                 var swatch=new Border{Width=17,Height=17,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center};
@@ -138,7 +138,7 @@ internal static class AnnotationToolbar
             panel.Children.Add(new TextBlock{Text="强度",FontSize=12,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)});
             var slider=new Slider{Minimum=6,Maximum=30,Value=layer.MosaicStrength,Width=110,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
             slider.ValueChanged+=(_,_)=>layer.MosaicStrength=(int)slider.Value;
-            panel.Children.Add(slider);
+            panel.Children.Add(TrackWrap(slider));
             return panel;
         }
         FrameworkElement TextOptions()
@@ -185,7 +185,7 @@ internal static class AnnotationToolbar
             panel.Children.Add(new TextBlock{Text="透明度",FontSize=12,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,8,0)});
             var slider=new Slider{Minimum=10,Maximum=80,Value=layer.WatermarkOpacity*100,Width=90,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
             slider.ValueChanged+=(_,_)=>layer.WatermarkOpacity=slider.Value/100;
-            panel.Children.Add(slider);
+            panel.Children.Add(TrackWrap(slider));
             return panel;
         }
         void UpdateOptions()
@@ -221,11 +221,15 @@ internal static class AnnotationToolbar
         // 把撤销移到动作组中第 undoAfter 个之后（与参考布局一致：工具组 | 贴图/滚动 | 撤销 | 保存/退出/复制）
         if(undoAfter>0)
         {
+            int undoPos=tools.Children.IndexOf(undo);
             tools.Children.Remove(undo);
+            // 原位置后方那条分隔线顶上来后会与前面的相邻，出现两条竖线；删掉冗余的一条
+            if(undoPos<tools.Children.Count&&tools.Children[undoPos] is Border{Width:1})tools.Children.RemoveAt(undoPos);
             int insertAt=1+1+7+1+Math.Min(undoAfter,extras.Length); // grip,sep,7 tools,sep,前 undoAfter 个 extras
             insertAt=Math.Min(insertAt,tools.Children.Count);
-            tools.Children.Insert(insertAt,undo);
-            tools.Children.Insert(insertAt+1,Separator());
+            tools.Children.Insert(insertAt,Separator());
+            tools.Children.Insert(insertAt+1,undo);
+            tools.Children.Insert(insertAt+2,Separator());
         }
         UpdateOptions();
         Refresh();
@@ -241,6 +245,8 @@ internal static class AnnotationToolbar
             host.Visibility=content==null?Visibility.Collapsed:Visibility.Visible;
         }
     }
+    // 滑动条外罩一层浅灰底托，让轨道位置一目了然。
+    static FrameworkElement TrackWrap(Slider slider)=>new Border{Background=new SolidColorBrush(Color.FromRgb(234,237,241)),CornerRadius=new CornerRadius(9),Padding=new Thickness(6,2,6,2),VerticalAlignment=VerticalAlignment.Center,Child=slider};
     static FrameworkElement BuildGrip()
     {
         var grid=new Grid{RowDefinitions={new RowDefinition(),new RowDefinition(),new RowDefinition()},ColumnDefinitions={new ColumnDefinition(),new ColumnDefinition()},HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};

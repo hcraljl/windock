@@ -97,9 +97,10 @@ sealed class CaptureWindow : Window
             var edge=EdgeHit(p);
             if(edge!=ResizeEdge.None){StartResize(edge,p);e.Handled=true;return;}
             if(layer.Current==AnnotationLayer.Tool.None&&InSelection(p)&&selection.Width>0&&layer.ShapeAt(p)==null){StartMove(p);e.Handled=true;}};
-        // 右键取消：不进入框选、不弹菜单，直接退出截图状态。
-        PreviewMouseRightButtonDown+=(_,e)=>{e.Handled=true;Close();};
+        // 右键取消：按下只吞事件，抬起时才关闭——覆盖层在抬起瞬间仍存在，事件不会落到桌面/下层窗口，避免弹出系统右键菜单
+        PreviewMouseRightButtonDown+=(_,e)=>{e.Handled=true;};
         MouseRightButtonDown+=(_,e)=>e.Handled=true;
+        PreviewMouseRightButtonUp+=(_,e)=>{e.Handled=true;Close();};
         MouseRightButtonUp+=(_,e)=>e.Handled=true;
         ContextMenu=null;
         MouseLeftButtonDown+=(_,e)=>{if(!selected){BeginSelect(e.GetPosition(root));e.Handled=true;}};

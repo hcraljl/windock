@@ -23,7 +23,7 @@ sealed class PinnedImage : Window
         this.settings=settings;this.at=at;
         WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;ShowActivated=false;Title="windock · 贴图";
         image=new Image{Source=source,Stretch=Stretch.Fill};RenderOptions.SetBitmapScalingMode(image,BitmapScalingMode.HighQuality);
-        var frame=new Border{CornerRadius=new CornerRadius(6),Child=image,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=18,ShadowDepth=4,Opacity=.45,Color=Color.FromRgb(12,18,28)}};
+        var frame=new Border{CornerRadius=new CornerRadius(6),Child=image,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=12,ShadowDepth=0,Opacity=.5,Color=Color.FromRgb(120,195,255)}};
         layer.Visibility=Visibility.Hidden;
         layer.MosaicProvider=rect=>{
             var source=(BitmapSource)image.Source;

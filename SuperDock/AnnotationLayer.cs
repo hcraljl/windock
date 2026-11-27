@@ -27,6 +27,7 @@ internal sealed class AnnotationLayer : Canvas
     public Rect? WatermarkBounds{get=>watermarkBounds;set{watermarkBounds=value;if(watermarkTile.Visibility==Visibility.Visible)RefreshWatermark();}}
     // 水印自动生效：选中文本非空时立即铺满；切换到其他工具后保留，撤销/清空才移除。
     bool watermarkApplied;
+    double watermarkJitterX,watermarkJitterY; // 每次重新生效时随机偏移，避免每次都从同一位置平铺
     public bool WatermarkApplied=>watermarkApplied&&!string.IsNullOrWhiteSpace(watermarkTextValue);
     public event Action? Changed;
     public event Action? ColorChanged;
@@ -91,13 +92,20 @@ internal sealed class AnnotationLayer : Canvas
             var p=rotation.Transform(corner);
             minX=Math.Min(minX,p.X);minY=Math.Min(minY,p.Y);maxX=Math.Max(maxX,p.X);maxY=Math.Max(maxY,p.Y);
         }
-        double padX=30,padY=20;
+        double padX=150,padY=100; // 稀疏排布：实例间留大间隙
         var group=new DrawingGroup
         {
             Transform=new TransformGroup{Children={rotation,new TranslateTransform(padX/2-minX,padY/2-minY)}},
             Children={new GeometryDrawing{Geometry=geo,Brush=new SolidColorBrush(watermarkColor)}}
         };
-        watermarkTile.Fill=new DrawingBrush{Drawing=group,TileMode=TileMode.Tile,Viewport=new Rect(0,0,(maxX-minX)+padX,(maxY-minY)+padY),ViewportUnits=BrushMappingMode.Absolute,Opacity=watermarkOpacity};
+        double stepX=(maxX-minX)+padX,stepY=(maxY-minY)+padY;
+        if(!wasApplied&&watermarkApplied) // 重新生效时随机偏移平铺起点
+        {
+            watermarkJitterX=System.Random.Shared.NextDouble()*stepX;
+            watermarkJitterY=System.Random.Shared.NextDouble()*stepY;
+        }
+        // 用 Viewport 负原点整体平移瓦片网格：文字始终完整落在单元格内，不会被裁切
+        watermarkTile.Fill=new DrawingBrush{Drawing=group,TileMode=TileMode.Tile,Viewport=new Rect(-watermarkJitterX,-watermarkJitterY,stepX,stepY),ViewportUnits=BrushMappingMode.Absolute,Opacity=watermarkOpacity};
         SetLeft(watermarkTile,region.Left);SetTop(watermarkTile,region.Top);
         watermarkTile.Width=region.Width;watermarkTile.Height=region.Height;
         watermarkTile.Clip=new RectangleGeometry(new Rect(0,0,region.Width,region.Height));
