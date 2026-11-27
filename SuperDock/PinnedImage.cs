@@ -16,6 +16,7 @@ sealed class PinnedImage : Window
     readonly AnnotationLayer layer=new();
     Border? toolbar;
     double zoomScale=1,zoomTarget=1;bool zoomAnimating;DateTime zoomLastFrame;double baseImgW=double.NaN,baseImgH=double.NaN;
+    Point zoomAnchorRatio=new(.5,.5); // 缩放锦点（图片内比例）：默认中心，滚轮时改为光标位置
     bool alwaysTop=true;
     readonly Rect? at;
     PinnedImage(BitmapSource source,MainWindow.Settings settings,Rect? at=null)
@@ -72,7 +73,11 @@ sealed class PinnedImage : Window
         };
         MouseLeftButtonUp+=(_,e)=>{if(dragging){dragging=false;ReleaseMouseCapture();}};
         MouseRightButtonUp+=(_,_)=>ShowMenu();
-        PreviewMouseWheel+=(_,e)=>{Zoom(e.Delta>0?1.1:1/1.1);e.Handled=true;};
+        // 连续缩放：按滚轮增量按比例变化（触模板的小增量也生效），锦点在光标处
+        PreviewMouseWheel+=(_,e)=>{
+            Point? anchor=null;try{anchor=PointToScreen(e.GetPosition(this));}catch{}
+            Zoom(Math.Pow(1.0008,e.Delta),anchor);e.Handled=true;
+        };
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}else if(e.Key==Key.Escape)Close();};
         Loaded+=(_,_)=>{live.Add(this);EnsureHook();};
         Closed+=(_,_)=>{live.Remove(this);if(live.Count==0)Unhook();};
@@ -107,8 +112,8 @@ sealed class PinnedImage : Window
                         var br=window.PointToScreen(new Point(window.ActualWidth,window.ActualHeight));
                         if(pt.X>=tl.X&&pt.X<=br.X&&pt.Y>=tl.Y&&pt.Y<=br.Y)
                         {
-                            var target=window;var factor=delta>0?1.1:1/1.1;
-                            target.Dispatcher.BeginInvoke(new Action(()=>{try{target.Zoom(factor);}catch{}}));
+                            var target=window;var factor=Math.Pow(1.0008,delta);
+                            target.Dispatcher.BeginInvoke(new Action(()=>{try{target.Zoom(factor,pt);}catch{}}));
                             return (IntPtr)1; // 吃掉滚轮，避免穿透到背后的页面
                         }
                     }
@@ -120,8 +125,9 @@ sealed class PinnedImage : Window
         hook=SetWindowsHookEx(14,hookProc,IntPtr.Zero,0); // WH_MOUSE_LL
     }
     static void Unhook(){if(hook!=IntPtr.Zero){UnhookWindowsHookEx(hook);hook=IntPtr.Zero;}}
-    // 平滑缩放：滚轮只更新目标缩放，渲染帧间用指数趋近过渡，消除逐格跳动的顿挫感。
-    void Zoom(double factor)
+    // 平滑缩放：滚轮只按增量更新目标缩放（delta=120 约等于 ×1.1），渲染帧间用指数趋近过渡；
+    // 锦点默认在光标下（滚动时光标所指位置不动），无光标信息时用窗口中心。
+    void Zoom(double factor,Point? anchorScreen=null)
     {
         if(layer.Visibility==Visibility.Visible)layer.CommitTyping();
         if(double.IsNaN(baseImgW))
@@ -134,8 +140,23 @@ sealed class PinnedImage : Window
         double max=Math.Max(min,Math.Min(work.Width*1.8/baseImgW,work.Height*2.4/baseImgH));
         double target=Math.Clamp(zoomTarget*factor,min,max);
         if(target==zoomTarget)return; // 已到目标（含边界钳制）
+        // 锦点：光标在窗口内的位置比例，缩放前后保持该点对齐光标
+        if(anchorScreen is Point screen)
+        {
+            var local=PointFromScreenSafe(screen);
+            double rx=ActualWidth>1?Math.Clamp(local.X/ActualWidth,0,1):.5;
+            double ry=ActualHeight>1?Math.Clamp(local.Y/ActualHeight,0,1):.5;
+            zoomAnchorRatio=new Point(rx,ry);
+        }
+        else zoomAnchorRatio=new Point(.5,.5);
         zoomTarget=target;zoomLastFrame=DateTime.UtcNow;
         if(!zoomAnimating){zoomAnimating=true;CompositionTarget.Rendering+=OnZoomFrame;}
+    }
+    // 钩子线程给的是屏幕物理坐标；转窗口逻辑坐标，失败时回退中心锦点。
+    Point PointFromScreenSafe(Point screen)
+    {
+        try{return PointFromScreen(screen);}
+        catch{return new Point(ActualWidth/2,ActualHeight/2);}
     }
     void OnZoomFrame(object? sender,EventArgs e)
     {
@@ -143,21 +164,22 @@ sealed class PinnedImage : Window
         var now=DateTime.UtcNow;
         double dt=Math.Min(.1,Math.Max(.001,(now-zoomLastFrame).TotalSeconds));
         zoomLastFrame=now;
-        zoomScale+=(zoomTarget-zoomScale)*(1-Math.Exp(-dt*13));
+        zoomScale+=(zoomTarget-zoomScale)*(1-Math.Exp(-dt*18));
         if(Math.Abs(zoomTarget-zoomScale)<=zoomTarget*.002)zoomScale=zoomTarget;
         ApplyZoom();
         if(zoomScale==zoomTarget){zoomAnimating=false;CompositionTarget.Rendering-=OnZoomFrame;}
     }
     void ApplyZoom()
     {
-        double cx=Left+ActualWidth/2,cy=Top+ActualHeight/2; // 以窗口当前中心为锚点缩放
+        var anchorScreen=new Point(Left+zoomAnchorRatio.X*ActualWidth,Top+zoomAnchorRatio.Y*ActualHeight); // 锦点在屏幕上的位置
         SizeToContent=SizeToContent.Manual;
         image.Width=baseImgW*zoomScale;image.Height=baseImgH*zoomScale;
         layer.Width=image.Width;layer.Height=image.Height;
-        layer.WatermarkBounds=new Rect(0,0,image.Width,image.Height);
+        if(layer.WatermarkBounds is not { } wb||Math.Abs(wb.Width-image.Width)>1||Math.Abs(wb.Height-image.Height)>1)
+            layer.WatermarkBounds=new Rect(0,0,image.Width,image.Height); // 每帧重建水印瓦片是缩放顿挫的主因，仅在尺寸变化时更新
         Width=image.Width;Height=image.Height;
         UpdateLayout();
-        Left=cx-ActualWidth/2;Top=cy-ActualHeight/2;
+        Left=anchorScreen.X-zoomAnchorRatio.X*ActualWidth;Top=anchorScreen.Y-zoomAnchorRatio.Y*ActualHeight;
         ClampIntoWork();
     }
     void ClampIntoWork()

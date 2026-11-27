@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <Version>1.8.9</Version><AssemblyName>Windock</AssemblyName><ApplicationIcon>Assets\logo.ico</ApplicationIcon><Company>windock</Company><Product>windock</Product><Title>windock</Title><Description>栖于桌边，触手可及</Description>
+    <Version>1.9.0</Version><AssemblyName>Windock</AssemblyName><ApplicationIcon>Assets\logo.ico</ApplicationIcon><Company>windock</Company><Product>windock</Product><Title>windock</Title><Description>栖于桌边，触手可及</Description>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

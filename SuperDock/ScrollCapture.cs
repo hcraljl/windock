@@ -95,21 +95,23 @@ internal static class ScrollCapture
         catch(Exception){return null;}
     }
     // 位移匹配：在 prev 底部与 cur 顶部找最小误差的位移量 o（cur 比 prev 多滚动了 o 像素）。
+    // 采样更密（32 列 × 逐行），阈值按画面自身波动归一化：文字页面抗锯齿也会造成差异，
+    // 固定阈值会把正常滚动误判成未滚动（表现为“只滚一小会儿就停”）。
     static int FindOffset(byte[] prev,byte[] cur,int w,int h,int maxSearch)
     {
         int best=0;double bestErr=double.MaxValue;
-        int cols=Math.Min(w,400)/8+1;
-        for(int o=0;o<=maxSearch&&o<h/2;o++)
+        int cols=Math.Min(w,512)/16+1;
+        int stride=w*4;
+        for(int o=0;o<=maxSearch&&o<h-4;o++)
         {
             double err=0;long count=0;
-            int rows=o/2+1;
-            for(int r=0;r<o;r+=2)
+            for(int r=0;r<o;r++)
             {
-                int pr=(h-o+r)*w*4,cr=r*w*4;
+                int pr=(h-o+r)*stride,cr=r*stride;
                 for(int c=0;c<cols;c++)
                 {
-                    int px=c*8*4;
-                    if(px+3>=w*4)break;
+                    int px=c*16*4;
+                    if(px+3>=stride)break;
                     int d=prev[pr+px]-cur[cr+px]+prev[pr+px+1]-cur[cr+px+1]+prev[pr+px+2]-cur[cr+px+2];
                     err+=d<0?-d:d;count++;
                 }
@@ -118,8 +120,25 @@ internal static class ScrollCapture
             err/=count;
             if(err<bestErr){bestErr=err;best=o;}
         }
-        // 阈值：误差过大说明画面不是纯滚动（弹层等），视为未滚动
-        return bestErr<30?best:0;
+        return bestErr<42?best:0;
+    }
+    // 帧是否一致（采样比较）：用于等待滚动动画结束（连续两帧相同才算定格）。
+    static bool SameFrame(byte[]? a,byte[]? b,int w,int h)
+    {
+        if(a==null||b==null)return false;
+        int stride=w*4;
+        for(int r=0;r<h;r+=4)
+        {
+            int at=r*stride;
+            for(int c=0;c<stride;c+=64)
+            {
+                int px=at+c;
+                if(px+3>=a.Length)return true;
+                int d=a[px]-b[px]+a[px+1]-b[px+1]+a[px+2]-b[px+2];
+                if((d<0?-d:d)>10)return false;
+            }
+        }
+        return true;
     }
     static void Loop(int x,int y,int w,int h,MainWindow.Settings settings)
     {
@@ -129,27 +148,35 @@ internal static class ScrollCapture
         rows.Add(first);
         SetCursorPos(x+w/2,Math.Min(y+h/2,y+h-8)); // 光标放到选区内，滚轮作用于下方窗口
         System.Threading.Thread.Sleep(250);
-        int total=0,stable=0;
+        int total=0,idle=0;
         var sw= Stopwatch.StartNew();
-        while(!cancelled&&rows.Count<400&&total<20000&&sw.ElapsedMilliseconds<120000)
+        int search=Math.Min(480,h/2);
+        while(!cancelled&&rows.Count<1200&&total<40000&&sw.ElapsedMilliseconds<180000)
         {
-            mouse_event(0x0800,0,0,unchecked((uint)(-120*3)),UIntPtr.Zero); // 滚轮下滚 3 格
-            System.Threading.Thread.Sleep(420);
-            var cap=Capture(x,y,w,h);
-            if(cap==null)break;
-            int o=FindOffset(rows[^1],cap,w,h,Math.Min(360,h/2));
-            if(o<=2)
+            mouse_event(0x0800,0,0,unchecked((uint)(-120*2)),UIntPtr.Zero); // 滚轮下滚 2 格
+            // 等滚动动画定格：连续两帧采样一致才继续（不等会拼出错位/重复内容）
+            byte[]? current=Capture(x,y,w,h);byte[]? previous=null;int settle=0;
+            while(settle<20&&!cancelled)
             {
-                stable++;
-                if(stable>=2)break; // 连续两次无位移 → 到底
+                System.Threading.Thread.Sleep(120);
+                previous=current;current=Capture(x,y,w,h);
+                if(current==null)break;
+                if(SameFrame(previous,current,w,h))break;
+                settle++;
             }
-            else
+            if(current==null)break;
+            int o=FindOffset(rows[^1],current,w,h,search);
+            if(o<=1)
             {
-                stable=0;
-                total+=o;
-                for(int r=h-o;r<h;r++)rows.Add(cap.AsSpan(r*w*4,w*4).ToArray());
-                UpdateHud(total);
+                // 页面没动：可能已到底。连续两个周期仍无位移才收尾，并给动画充分的余量。
+                idle++;
+                if(idle>=2)break;
+                continue;
             }
+            idle=0;
+            total+=o;
+            for(int r=h-o;r<h;r++)rows.Add(current.AsSpan(r*w*4,w*4).ToArray());
+            UpdateHud(total);
         }
         Finish(Assemble(rows,w,h),settings);
     }

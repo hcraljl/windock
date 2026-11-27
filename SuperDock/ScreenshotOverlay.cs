@@ -47,6 +47,7 @@ sealed class CaptureWindow : Window
     readonly MainWindow owner;readonly MainWindow.Settings settings;readonly bool translateMode;
     readonly BitmapSource screen;double dpiX=1,dpiY=1; // 物理像素↔逻辑坐标换算，SourceInitialized 后按窗口实际 DPI 重设
     readonly Rect area;
+    byte[] screenPixels=[]; // 冻结帧的原始像素（取色用，与 screen 同布局：虚拟屏物理像素自上而下）
     readonly Grid root=new();
     readonly Image frame=new();
     readonly AnnotationLayer layer=new();
@@ -56,6 +57,7 @@ sealed class CaptureWindow : Window
     readonly Rectangle selectionBorder=new(){Stroke=new SolidColorBrush(Color.FromRgb(111,207,255)),StrokeThickness=1.4,Visibility=Visibility.Hidden};
     readonly TextBlock sizeLabel=new(){Foreground=Brushes.White,FontSize=12,FontWeight=FontWeights.SemiBold,Background=new SolidColorBrush(Color.FromArgb(220,34,37,41)),Padding=new Thickness(7,3,7,3),Visibility=Visibility.Hidden};
     Border? toolbar;
+    Point? toolbarAnchor; // 手柄拖动后记住的工具条位置；点击工具/换选项时不再自动回到选区旁
     FrameworkElement? firstHint;
     Point start;bool selecting,selected;Rect selection;
     public CaptureWindow(MainWindow owner,MainWindow.Settings settings,bool translate=false)
@@ -65,7 +67,7 @@ sealed class CaptureWindow : Window
         frame.Stretch=Stretch.Fill;RenderOptions.SetBitmapScalingMode(frame,BitmapScalingMode.NearestNeighbor);
         dim.IsHitTestVisible=false;selectionBorder.IsHitTestVisible=false;sizeLabel.IsHitTestVisible=false;
         chrome.Children.Add(dim);chrome.Children.Add(selectionBorder);chrome.Children.Add(sizeLabel);
-        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · 框选后自动识别并中英互译 · 右键或 Esc 取消":"拖动框选截图区域 · 完成后可标注、复制、保存或贴图 · 右键或 Esc 取消",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
+        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · 框选后自动识别并中英互译 · 右键或 Esc 取消":"悬停自动框选窗口，单击整窗截取或拖动自选 · 按 C 复制光标颜色 · 右键或 Esc 取消",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
         hint.IsHitTestVisible=false;chrome.Children.Add(hint);firstHint=hint;
         // 钉钉式选区手柄：四角 + 四边中点，白色圆点蓝描边（拖边缘即可调整大小，手柄仅作视觉指示）。
         for(int i=0;i<8;i++)
@@ -73,12 +75,18 @@ sealed class CaptureWindow : Window
             var handle=new Ellipse{Width=9,Height=9,Fill=Brushes.White,Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.4,Visibility=Visibility.Hidden,IsHitTestVisible=false};
             handles.Add(handle);chrome.Children.Add(handle);
         }
+        // —— 悬停辅助：取色面板（F1 后、拖动前显示，按 C 复制 / SHIFT 切 RGB/HEX）——
+        BuildColorPicker();chrome.Children.Add(picker);
+        // —— 智能区域候选：光标下的顶层窗口高亮，单击采纳，拖动则手动框选 ——
+        smartFrame=new Rectangle{Stroke=new SolidColorBrush(Color.FromRgb(111,207,255)),StrokeThickness=1.6,Fill=new SolidColorBrush(Color.FromArgb(26,255,255,255)),Visibility=Visibility.Hidden,IsHitTestVisible=false};
+        smartLabel=new TextBlock{Foreground=Brushes.White,FontSize=12,FontWeight=FontWeights.SemiBold,Background=new SolidColorBrush(Color.FromArgb(220,34,37,41)),Padding=new Thickness(7,3,7,3),Visibility=Visibility.Hidden,IsHitTestVisible=false};
+        chrome.Children.Add(smartFrame);chrome.Children.Add(smartLabel);
         root.Children.Add(frame);root.Children.Add(layer);root.Children.Add(chrome);
         layer.Visibility=Visibility.Hidden; // 完成框选前不响应标注
         layer.MosaicProvider=rect=>AnnotationLayer.Pixelate(screen,new Rect(rect.Left*dpiX,rect.Top*dpiY,rect.Width*dpiX,rect.Height*dpiY),layer.MosaicStrength);
         Content=root;
         // 截图支持跨屏：覆盖层与冻结帧覆盖整个虚拟桌面（所有显示器拼接）。
-        screen=CaptureScreen(out var capturedArea,out dpiX,out dpiY);area=capturedArea;
+        screen=CaptureScreen(out var capturedArea,out dpiX,out dpiY,out screenPixels);area=capturedArea;
         frame.Source=screen;
         WindowStartupLocation=WindowStartupLocation.Manual;
         SourceInitialized+=(_,_)=>{DesktopIntegration.MovePhysical(this,area.Left,area.Top);
@@ -89,7 +97,22 @@ sealed class CaptureWindow : Window
             // 遮罩是 Canvas 内的 Border，必须显式设定尺寸（Canvas 不拉伸子元素），否则永远不会渲染。
             dim.Width=Width;dim.Height=Height;};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
-        PreviewKeyDown+=(_,e)=>{if(layer.IsTyping)return;if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}else if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
+        PreviewKeyDown+=(_,e)=>{
+            if(layer.IsTyping)return;
+            if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}
+            else if(e.Key==Key.Escape){Close();e.Handled=true;}
+            else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}
+            else if(e.Key==Key.C&&!selected&&!selecting&&hoverColor is { } color) // 取色：C 复制当前颜色
+            {
+                var text=hexFormat?$"#{color.R:X2}{color.G:X2}{color.B:X2}":$"{color.R}, {color.G}, {color.B}";
+                try{System.Windows.Clipboard.SetText(text);}catch(System.Runtime.InteropServices.COMException){}
+                ActivityStore.Write("截图",message:"已复制颜色 "+text);
+                copyHint.Text="已复制到剪贴板 ✓";
+                Dispatcher.BeginInvoke(new Action(()=>{if(!selected&&!selecting)copyHint.Text="按 C 复制颜色值";}),System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                e.Handled=true;
+            }
+            else if((e.Key==Key.LeftShift||e.Key==Key.RightShift)&&!e.IsRepeat&&!selected&&!selecting){hexFormat=!hexFormat;if(lastHover!=null)UpdateColorPanel(lastHover.Value);e.Handled=true;}
+        };
         // 选区外点击：无标注工具时重新框选；工具激活时忽略（避免误触清空所有标注/重置截图），也不在选区外绘制
         PreviewMouseLeftButtonDown+=(_,e)=>{var p=e.GetPosition(root);if(selected&&!InSelection(p)&&!OverChrome(e,chrome)){if(layer.Current==AnnotationLayer.Tool.None)BeginSelect(p);e.Handled=true;}};
         // 选区二次调整与整体拖动：靠近边缘/角拖动可拉大拉小；未选标注工具时按住选区内部可整框拖动（默认提供，不单独列按钮）。
@@ -103,17 +126,158 @@ sealed class CaptureWindow : Window
         PreviewMouseRightButtonUp+=(_,e)=>{e.Handled=true;Close();};
         MouseRightButtonUp+=(_,e)=>e.Handled=true;
         ContextMenu=null;
-        MouseLeftButtonDown+=(_,e)=>{if(!selected){BeginSelect(e.GetPosition(root));e.Handled=true;}};
+        MouseLeftButtonDown+=(_,e)=>{
+            if(selected)return;
+            var p=e.GetPosition(root);
+            downPoint=p;
+            // 智能区域：候选框可见时先挂起——单击采纳整个窗口区域，拖动则转为手动框选
+            if(smartFrame.Visibility==Visibility.Visible&&currentSmartRect is { } candidate){adoptPending=true;adoptCandidate=candidate;e.Handled=true;return;}
+            BeginSelect(p);e.Handled=true;
+        };
         MouseMove+=(_,e)=>{
             var p=e.GetPosition(root);
+            if(adoptPending) // 挂起中：拖动超过阈值则转为手动框选
+            {
+                if((p-downPoint).Length>5){adoptPending=false;HideHoverHelpers();BeginSelect(downPoint);}
+                return;
+            }
             if(resizing)UpdateResize(p);
             else if(moving)UpdateMove(p);
             else if(selecting)UpdateSelection(p);
             else if(selected)Cursor=EdgeHit(p)!=ResizeEdge.None?CursorFor(EdgeHit(p)):layer.Current==AnnotationLayer.Tool.None&&InSelection(p)?Cursors.SizeAll:Cursors.Cross;
-            else Cursor=Cursors.Cross;
+            else{Cursor=Cursors.Cross;UpdateHoverHelpers(p);}
             if(!IsActive)Activate();
         };
-        MouseLeftButtonUp+=(_,e)=>{if(resizing||moving){resizing=false;moving=false;ReleaseMouseCapture();Cursor=Cursors.Cross;PlaceToolbar();toolbar?.Visibility=Visibility.Visible;}else if(selecting)FinishSelection();};
+        MouseLeftButtonUp+=(_,e)=>{
+            if(adoptPending){AdoptCandidate();e.Handled=true;return;}
+            if(resizing||moving){resizing=false;moving=false;ReleaseMouseCapture();Cursor=Cursors.Cross;PlaceToolbar();toolbar?.Visibility=Visibility.Visible;}
+            else if(selecting)FinishSelection();
+        };
+    }
+    // —— 悬停辅助（取色 + 智能区域）公共状态 ——
+    bool adoptPending;Rect adoptCandidate;Point downPoint;
+    Point? lastHover;Color? hoverColor;bool hexFormat=true;
+    Rect? currentSmartRect;
+    readonly Canvas picker=new(){IsHitTestVisible=false,Visibility=Visibility.Hidden};
+    Rectangle quadrantTl=null!,quadrantTr=null!,quadrantBl=null!,quadrantBr=null!;
+    TextBlock coordText=null!,colorText=null!,copyHint=null!;
+    Rectangle smartFrame=null!;TextBlock smartLabel=null!;
+    void BuildColorPicker()
+    {
+        var preview=new Grid{Width=44,Height=44,RowDefinitions={new RowDefinition(),new RowDefinition()},ColumnDefinitions={new ColumnDefinition(),new ColumnDefinition()}};
+        quadrantTl=new Rectangle{Fill=Brushes.Black};quadrantTr=new Rectangle{Fill=Brushes.Black};quadrantBl=new Rectangle{Fill=Brushes.Black};quadrantBr=new Rectangle{Fill=Brushes.Black};
+        Grid.SetRow(quadrantTl,0);Grid.SetColumn(quadrantTl,0);Grid.SetRow(quadrantTr,0);Grid.SetColumn(quadrantTr,1);
+        Grid.SetRow(quadrantBl,1);Grid.SetColumn(quadrantBl,0);Grid.SetRow(quadrantBr,1);Grid.SetColumn(quadrantBr,1);
+        preview.Children.Add(quadrantTl);preview.Children.Add(quadrantTr);preview.Children.Add(quadrantBl);preview.Children.Add(quadrantBr);
+        // 十字线（蓝色）+ 白色外框，参考常见取色器的十字准星样式
+        var cross=new Canvas{IsHitTestVisible=false};
+        cross.Children.Add(new System.Windows.Shapes.Line{X1=0,Y1=22,X2=44,Y2=22,Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.6});
+        cross.Children.Add(new System.Windows.Shapes.Line{X1=22,Y1=0,X2=22,Y2=44,Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.6});
+        preview.Children.Add(cross);
+        coordText=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,2)};
+        colorText=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,2)};
+        copyHint=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,1),Text="按 C 复制颜色值"};
+        var shiftHint=new TextBlock{Foreground=Brushes.White,FontSize=11,Text="按 SHIFT 切换RGB/HEX"};
+        var panel=new Border{Background=new SolidColorBrush(Color.FromArgb(205,10,14,20)),CornerRadius=new CornerRadius(4),Padding=new Thickness(8,6,8,6),Child=new StackPanel{Children={coordText,colorText,copyHint,shiftHint}}};
+        picker.Children.Add(preview);picker.Children.Add(panel);
+        Canvas.SetTop(panel,48);
+    }
+    void UpdateHoverHelpers(Point p)
+    {
+        lastHover=p;
+        UpdateColorPanel(p);
+        UpdateSmartRegion(p);
+    }
+    void HideHoverHelpers()
+    {
+        picker.Visibility=Visibility.Hidden;
+        smartFrame.Visibility=Visibility.Hidden;smartLabel.Visibility=Visibility.Hidden;
+        currentSmartRect=null;lastHover=null;
+    }
+    // 从冻结帧采样颜色：像素数组与虚拟屏物理坐标对齐（BGR32 自上而下）。
+    Color SampleAt(double px,double py)
+    {
+        int vw=(int)area.Width,vh=(int)area.Height;
+        if(screenPixels.Length==0||vw<=0||vh<=0)return Colors.Black;
+        int x=Math.Clamp((int)Math.Round(px-area.Left),0,vw-1),y=Math.Clamp((int)Math.Round(py-area.Top),0,vh-1);
+        int i=(y*vw+x)*4;
+        return Color.FromRgb(screenPixels[i+2],screenPixels[i+1],screenPixels[i]);
+    }
+    void UpdateColorPanel(Point p)
+    {
+        if(selected||selecting){picker.Visibility=Visibility.Hidden;return;}
+        double px=area.Left+p.X*dpiX,py=area.Top+p.Y*dpiY;
+        var center=SampleAt(px,py);
+        hoverColor=center;
+        quadrantTl.Fill=new SolidColorBrush(SampleAt(px-6,py-6));
+        quadrantTr.Fill=new SolidColorBrush(SampleAt(px+6,py-6));
+        quadrantBl.Fill=new SolidColorBrush(SampleAt(px-6,py+6));
+        quadrantBr.Fill=new SolidColorBrush(SampleAt(px+6,py+6));
+        coordText.Text=$"坐标: {(int)px}, {(int)py}";
+        colorText.Text=hexFormat?$"■ #{center.R:X2}{center.G:X2}{center.B:X2}":$"■ {center.R}, {center.G}, {center.B}";
+        picker.Visibility=Visibility.Visible;
+        double lx=Math.Clamp(p.X+18,2,Math.Max(2,Width-140)),ly=Math.Clamp(p.Y+18,2,Math.Max(2,Height-120));
+        Canvas.SetLeft(picker,lx);Canvas.SetTop(picker,ly);
+    }
+    void UpdateSmartRegion(Point p)
+    {
+        if(selected||selecting){smartFrame.Visibility=Visibility.Hidden;smartLabel.Visibility=Visibility.Hidden;currentSmartRect=null;return;}
+        var phys=new Point(area.Left+p.X*dpiX,area.Top+p.Y*dpiY);
+        var candidate=FindWindowRectAt(phys);
+        if(candidate is { } rect&&rect.Width>=48&&rect.Height>=48)
+        {
+            var logical=new Rect((rect.Left-area.Left)/dpiX,(rect.Top-area.Top)/dpiY,rect.Width/dpiX,rect.Height/dpiY);
+            currentSmartRect=logical;
+            smartFrame.Visibility=Visibility.Visible;smartLabel.Visibility=Visibility.Visible;
+            Canvas.SetLeft(smartFrame,logical.Left);Canvas.SetTop(smartFrame,logical.Top);
+            smartFrame.Width=logical.Width;smartFrame.Height=logical.Height;
+            smartLabel.Text=$"{(int)(logical.Width*dpiX)} × {(int)(logical.Height*dpiY)}";
+            Canvas.SetLeft(smartLabel,logical.Left);Canvas.SetTop(smartLabel,Math.Max(0,logical.Top-26));
+        }
+        else{smartFrame.Visibility=Visibility.Hidden;smartLabel.Visibility=Visibility.Hidden;currentSmartRect=null;}
+    }
+    // 单击采纳智能候选区域（松开时触发，未拖动）。
+    void AdoptCandidate()
+    {
+        adoptPending=false;
+        var rect=adoptCandidate;
+        HideHoverHelpers();
+        if(rect.Width<8||rect.Height<8)return;
+        ApplySelectionRect(rect);
+        selected=true;selecting=false;
+        layer.Visibility=Visibility.Visible;
+        if(translateMode)RunTranslation();
+        else ShowToolbar();
+    }
+    // —— 智能区域检测：光标下的最顶层窗口（排除自身进程、工具窗、被遮藏的 UWP） ——
+    delegate bool EnumWindowsProc(IntPtr hWnd,IntPtr lParam);
+    [DllImport("user32.dll")]static extern bool EnumWindows(EnumWindowsProc proc,IntPtr lParam);
+    [DllImport("user32.dll")]static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")]static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")]static extern int GetWindowLong(IntPtr hWnd,int nIndex);
+    [DllImport("user32.dll")]static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint pid);
+    [DllImport("dwmapi.dll")]static extern int DwmGetWindowAttribute(IntPtr hWnd,int attribute,out Rect32 value,int size);
+    [DllImport("user32.dll")]static extern bool GetWindowRect(IntPtr hWnd,out Rect32 value);
+    [StructLayout(LayoutKind.Sequential)]struct Rect32{public int Left,Top,Right,Bottom;}
+    static Rect? FindWindowRectAt(Point point)
+    {
+        Rect? found=null;
+        uint selfPid=(uint)Environment.ProcessId;
+        EnumWindows((hWnd,_)=>{
+            if(!IsWindowVisible(hWnd)||IsIconic(hWnd))return true;
+            GetWindowThreadProcessId(hWnd,out var pid);if(pid==selfPid)return true; // 排除自身（覆盖层/提示窗）
+            if((GetWindowLong(hWnd,-20)&0x80)!=0)return true; // WS_EX_TOOLWINDOW：悬浮工具/提示窗
+            if(!GetWindowRect(hWnd,out var raw))return true;
+            if(raw.Right-raw.Left<48||raw.Bottom-raw.Top<48)return true;
+            if(point.X<raw.Left||point.X>=raw.Right||point.Y<raw.Top||point.Y>=raw.Bottom)return true;
+            if(DwmGetWindowAttribute(hWnd,14,out var cloak,Marshal.SizeOf<Rect32>())==0&&cloak.Left!=0)return true; // DWMWA_CLOAKED：隐藏的 UWP/虚拟桌面窗口
+            var r=raw;
+            if(DwmGetWindowAttribute(hWnd,9,out var frame,Marshal.SizeOf<Rect32>())==0&&frame.Right-frame.Left>0)r=frame; // DWMWA_EXTENDED_FRAME_BOUNDS：可见边界（去阴影）
+            if(point.X<r.Left||point.X>=r.Right||point.Y<r.Top||point.Y>=r.Bottom)return true;
+            found=new Rect(r.Left,r.Top,r.Right-r.Left,r.Bottom-r.Top);
+            return false; // Z序最靠前的命中窗口
+        },IntPtr.Zero);
+        return found;
     }
     bool moving;Point moveStart;Rect moveRect;
     void StartMove(Point point)
@@ -171,7 +335,7 @@ sealed class CaptureWindow : Window
     bool InSelection(Point point)=>selection.Contains(point);
     void BeginSelect(Point point)
     {
-        CommitTyping();layer.ClearAll();toolbar?.Visibility=Visibility.Collapsed;if(firstHint!=null){chrome.Children.Remove(firstHint);firstHint=null;}selected=false;selecting=true;start=point;
+        CommitTyping();layer.ClearAll();toolbar?.Visibility=Visibility.Collapsed;toolbarAnchor=null;HideHoverHelpers();if(firstHint!=null){chrome.Children.Remove(firstHint);firstHint=null;}selected=false;selecting=true;start=point;
         layer.Visibility=Visibility.Hidden;UpdateSelection(point);
     }
     void UpdateSelection(Point point)
@@ -212,6 +376,7 @@ sealed class CaptureWindow : Window
     void FinishSelection()
     {
         selecting=false;
+        HideHoverHelpers();
         if(selection.Width<8||selection.Height<8){dim.Clip=null;selectionBorder.Visibility=Visibility.Hidden;sizeLabel.Visibility=Visibility.Hidden;selected=false;return;}
         selected=true;
         layer.Visibility=Visibility.Visible;
@@ -267,7 +432,7 @@ sealed class CaptureWindow : Window
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;
     }
-    // 手柄拖动：移动工具条位置（限制在窗口内）。
+    // 手柄拖动：移动工具条位置（限制在窗口内），并记住位置避免后续自动回位。
     void OnGripDrag(Vector v)
     {
         if(toolbar==null)return;
@@ -276,6 +441,7 @@ sealed class CaptureWindow : Window
         l=Math.Clamp(l,4,Math.Max(4,Width-toolbar.ActualWidth-4));
         t=Math.Clamp(t,4,Math.Max(4,Height-toolbar.ActualHeight-4));
         Canvas.SetLeft(toolbar,l);Canvas.SetTop(toolbar,t);
+        toolbarAnchor=new Point(l,t);
     }
     internal void OnToolbarLayoutChanged()=>PlaceToolbar();
     // 滚动截图：把选区屏幕物理位置交给 ScrollCapture（覆盖层先关闭，露出下方内容）。
@@ -292,6 +458,14 @@ sealed class CaptureWindow : Window
         if(toolbar==null)return;
         toolbar.Measure(new Size(double.PositiveInfinity,double.PositiveInfinity));
         double tw=toolbar.DesiredSize.Width,th=toolbar.DesiredSize.Height;
+        if(toolbarAnchor is Point anchor) // 手动拖过：跟随记住的位置（仅边界约束）
+        {
+            double ax=Math.Clamp(anchor.X,4,Math.Max(4,Width-tw-4));
+            double ay=Math.Clamp(anchor.Y,4,Math.Max(4,Height-th-4));
+            Canvas.SetLeft(toolbar,ax);Canvas.SetTop(toolbar,ay);
+            toolbarAnchor=new Point(ax,ay);
+            return;
+        }
         double x=selection.Right-tw,y=selection.Bottom+10;
         if(y+th>Height-8)y=selection.Top-th-10;
         if(y<8)y=Math.Max(8,Height-th-8);
@@ -366,7 +540,7 @@ sealed class CaptureWindow : Window
         catch(Exception ex)when(ex is System.Runtime.InteropServices.COMException){GlassDialog.Show("贴图失败："+ex.Message);}
     }
     // 截取整个虚拟桌面（所有显示器）的物理像素（GDI BitBlt，避免引入 WinForms）。
-    static BitmapSource CaptureScreen(out Rect area,out double dpiX,out double dpiY)
+    static BitmapSource CaptureScreen(out Rect area,out double dpiX,out double dpiY,out byte[] pixels)
     {
         int vx=GetSystemMetrics(76),vy=GetSystemMetrics(77),vw=GetSystemMetrics(78),vh=GetSystemMetrics(79); // SM_XVIRTUALSCREEN…
         if(vw<=0){vx=0;vy=0;vw=GetSystemMetrics(0);vh=GetSystemMetrics(1);}
@@ -378,10 +552,11 @@ sealed class CaptureWindow : Window
         var dib=CreateDIBSection(hdcMem,ref info,0,out var bits,IntPtr.Zero,0);
         var previous=SelectObject(hdcMem,dib);
         BitBlt(hdcMem,0,0,vw,vh,hdcScreen,vx,vy,0x00CC0020|0x40000000); // SRCCOPY|CAPTUREBLT
-        var pixels=new byte[vw*vh*4];
-        Marshal.Copy(bits,pixels,0,pixels.Length);
+        var buffer=new byte[vw*vh*4];
+        Marshal.Copy(bits,buffer,0,buffer.Length);
         SelectObject(hdcMem,previous);DeleteObject(dib);DeleteDC(hdcMem);ReleaseDC(IntPtr.Zero,hdcScreen);
-        var source=BitmapSource.Create(vw,vh,96,96,PixelFormats.Bgr32,null,pixels,vw*4);
+        pixels=buffer;
+        var source=BitmapSource.Create(vw,vh,96,96,PixelFormats.Bgr32,null,buffer,vw*4);
         source.Freeze();return source;
     }
     [StructLayout(LayoutKind.Sequential)]

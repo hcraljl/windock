@@ -41,7 +41,7 @@ internal sealed class AnnotationLayer : Canvas
     // 图形选择：修饰层（虚线框+8 手柄）挂在画布顶层，IsHitTestVisible=false，不参与绘制与撤销。
     readonly Canvas overlay=new(){IsHitTestVisible=false,Visibility=Visibility.Collapsed};
     readonly Rectangle watermarkTile=new(){IsHitTestVisible=false,Visibility=Visibility.Collapsed};
-    readonly Rectangle shapeBorder=new(){Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.4,StrokeDashArray=new DoubleCollection{4,3},Fill=Brushes.Transparent};
+    readonly Rectangle shapeBorder=new(){StrokeThickness=0,Fill=Brushes.Transparent};
     readonly List<Ellipse> shapeHandles=new();
     public UIElement? SelectedShape{get;private set;}
     public AnnotationLayer()
@@ -50,7 +50,7 @@ internal sealed class AnnotationLayer : Canvas
         overlay.Children.Add(shapeBorder);
         for(int i=0;i<8;i++)
         {
-            var handle=new Ellipse{Width=8,Height=8,Fill=Brushes.White,Stroke=new SolidColorBrush(Color.FromRgb(35,125,245)),StrokeThickness=1.3};
+            var handle=new Ellipse{Width=13,Height=13,Fill=Brushes.White,Stroke=new SolidColorBrush(Color.FromArgb(120,70,80,90)),StrokeThickness=1};
             shapeHandles.Add(handle);overlay.Children.Add(handle);
         }
         Children.Add(overlay); // 置于最底层占位；渲染时提到顶层
@@ -92,7 +92,7 @@ internal sealed class AnnotationLayer : Canvas
             var p=rotation.Transform(corner);
             minX=Math.Min(minX,p.X);minY=Math.Min(minY,p.Y);maxX=Math.Max(maxX,p.X);maxY=Math.Max(maxY,p.Y);
         }
-        double padX=150,padY=100; // 稀疏排布：实例间留大间隙
+        double padX=260,padY=170; // 稀疏排布：实例间留大间隙
         var group=new DrawingGroup
         {
             Transform=new TransformGroup{Children={rotation,new TranslateTransform(padX/2-minX,padY/2-minY)}},
@@ -239,7 +239,7 @@ internal sealed class AnnotationLayer : Canvas
         };
         for(int i=0;i<shapeHandles.Count&&i<points.Length;i++)
         {
-            Canvas.SetLeft(shapeHandles[i],points[i].X-4);Canvas.SetTop(shapeHandles[i],points[i].Y-4);
+            Canvas.SetLeft(shapeHandles[i],points[i].X-6.5);Canvas.SetTop(shapeHandles[i],points[i].Y-6.5);
             shapeHandles[i].Visibility=shapeBorder.Width>18||shapeBorder.Height>18?Visibility.Visible:Visibility.Collapsed;
         }
     }
@@ -254,7 +254,7 @@ internal sealed class AnnotationLayer : Canvas
             new Point(bounds.Left,bounds.Top+bounds.Height/2),new Point(bounds.Right,bounds.Top+bounds.Height/2),
             new Point(bounds.Left,bounds.Bottom),new Point(bounds.Left+bounds.Width/2,bounds.Bottom),new Point(bounds.Right,bounds.Bottom)
         };
-        for(int i=0;i<points.Length;i++)if((point-points[i]).Length<=7)return i;
+        for(int i=0;i<points.Length;i++)if((point-points[i]).Length<=9)return i;
         return -1;
     }
     int shapeHandle=-1;Point shapeStart;Rect shapeStartBounds;Point[] shapeArrowFromTo=null!;

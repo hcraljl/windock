@@ -46,23 +46,24 @@ internal sealed partial class AppearanceWindow : Window
     }
     Brush SidebarBrush=>RailBg;
     Brush SettingsCard=>CardBg;
-    // —— 设置工作台暖色主题（参考 WorkBuddy 日常集风格：暖米色底/白色大圆角卡片/衬线标题/梅紫点缀）——
+    // —— 设置工作台主题（参考参考图：鼠尾草绿侧栏/白色卡片/石板蓝墨色文字/蓝色强调）——
     static Brush W(string hex)=>(Brush)new System.Windows.Media.BrushConverter().ConvertFromString(hex)!;
-    static Brush Ink=>Theme.Dark?W("#F2EAE0"):W("#3C3327");
-    static Brush Muted=>Theme.Dark?W("#B5A593"):W("#A18D76");
-    static Brush CardBg=>Theme.Dark?W("#3A322B"):W("#FFFFFF");
-    static Brush Stroke=>Theme.Dark?W("#4A4034"):W("#EDE2D2");
-    static Brush Hover=>Theme.Dark?W("#453B32"):W("#F7F0E5");
-    static Brush Wash=>Theme.Dark?W("#4C3941"):W("#F3E3E9");
-    static Brush Accent=>Theme.Dark?W("#ECC9D6"):W("#6B4055"); // 强调前景/描边
-    static Brush AccentSolid=>W("#6B4055"); // 开关等实底强调
-    static Brush PageBg=>Theme.Dark?W("#2A2420"):W("#F6F1E9");
-    static Brush RailBg=>Theme.Dark?W("#322B25"):W("#EFE7DB");
-    static Brush TrackBg=>Theme.Dark?W("#4A4034"):W("#E4DACB");
+    static Brush Ink=>Theme.Dark?W("#EAF1EC"):W("#2B3A42");
+    static Brush Muted=>Theme.Dark?W("#93A29B"):W("#8A99A0");
+    static Brush CardBg=>Theme.Dark?W("#333A37"):W("#FFFFFF");
+    static Brush Stroke=>Theme.Dark?W("#3E4744"):W("#E2E8E0");
+    static Brush Hover=>Theme.Dark?W("#3A443F"):W("#EEF2EC");
+    static Brush Wash=>Theme.Dark?W("#274156"):W("#DCE9F7"); // 浅蓝选中底
+    static Brush Accent=>Theme.Dark?W("#7CC4F8"):W("#2F9BF0"); // 强调前景/描边
+    static Brush AccentSolid=>Theme.Dark?W("#2F9BF0"):W("#2F9BF0"); // 开关等实底强调
+    static Brush PageBg=>Theme.Dark?W("#262B29"):W("#F3F5F2");
+    static Brush RailBg=>Theme.Dark?W("#2E3532"):W("#DCE2DA"); // 鼠尾草绿侧栏
+    static Brush TrackBg=>Theme.Dark?W("#3A4440"):W("#E4EAE2");
+    static Brush NavSelected=>Theme.Dark?W("#31413E"):W("#3A4A47"); // 侧栏选中块：深石板绿、白字
     void ApplyGlassResources()
     {
         // 窗口级覆写共享样式里的 DynamicResource，只影响设置工作台，不污染全局主题
-        Resources["ThemeText"]=Ink;Resources["ThemeMuted"]=Muted;Resources["ThemeCard"]=CardBg;Resources["ThemeStroke"]=Stroke;Resources["ThemeHover"]=Hover;Resources["ThemeSelected"]=Wash;Resources["SwitchOn"]=AccentSolid;Resources["SwitchOff"]=TrackBg;Resources["SwitchBorder"]=Stroke;Resources["ThemeTrack"]=TrackBg;Resources["SettingsAccent"]=Accent;
+        Resources["ThemeText"]=Ink;Resources["ThemeMuted"]=Muted;Resources["ThemeCard"]=CardBg;Resources["ThemeStroke"]=Stroke;Resources["ThemeHover"]=Hover;Resources["ThemeSelected"]=Wash;Resources["SwitchOn"]=AccentSolid;Resources["SwitchOff"]=TrackBg;Resources["SwitchBorder"]=Stroke;Resources["ThemeTrack"]=TrackBg;Resources["SettingsAccent"]=Accent;Resources["NavSelected"]=NavSelected;
     }
     void ApplyWindowTheme()
     {

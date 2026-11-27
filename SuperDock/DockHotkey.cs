@@ -59,7 +59,17 @@ public partial class MainWindow
     }
     void ToggleSettingsWindow()
     {
-        var target=Coordinator?.Primary??this;
+        // 设置窗口出现在鼠标所在的显示器：优先选光标所在屏幕的 Dock，否则用主 Dock
+        var target=this;
+        if(Coordinator!=null)
+        {
+            target=Coordinator.Primary;
+            if(DesktopIntegration.Cursor(out var cursor))
+            {
+                var hit=Coordinator.Docks.FirstOrDefault(d=>d.PhysicalWorkArea.Contains(cursor));
+                if(hit!=null)target=hit;
+            }
+        }
         if(target.appearanceWindow is { IsVisible:true } open)
         {
             open.Close();ActivityStore.Write("设置窗口",message:"Alt+S 关闭设置窗口");return;
