@@ -67,7 +67,7 @@ sealed class CaptureWindow : Window
         frame.Stretch=Stretch.Fill;RenderOptions.SetBitmapScalingMode(frame,BitmapScalingMode.NearestNeighbor);
         dim.IsHitTestVisible=false;selectionBorder.IsHitTestVisible=false;sizeLabel.IsHitTestVisible=false;
         chrome.Children.Add(dim);chrome.Children.Add(selectionBorder);chrome.Children.Add(sizeLabel);
-        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · 框选后自动识别并中英互译 · 右键或 Esc 取消":"悬停自动框选窗口，单击整窗截取或拖动自选 · 按 C 复制光标颜色 · 右键或 Esc 取消",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
+        var hint=new TextBlock{Text=translateMode?"拖动框选要翻译的文字 · 框选后自动识别并中英互译 · 右键或 Esc 取消":"悬停自动框选窗口，单击整窗截取或拖动自选 · 按 C 复制颜色并结束 · 右键或 Esc 取消",FontSize=14,Foreground=Brushes.White,Background=new SolidColorBrush(Color.FromArgb(140,10,14,20)),Padding=new Thickness(14,8,14,8),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,24,0,0)};
         hint.IsHitTestVisible=false;chrome.Children.Add(hint);firstHint=hint;
         // 钉钉式选区手柄：四角 + 四边中点，白色圆点蓝描边（拖边缘即可调整大小，手柄仅作视觉指示）。
         for(int i=0;i<8;i++)
@@ -174,7 +174,7 @@ sealed class CaptureWindow : Window
         preview.Children.Add(cross);
         coordText=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,2)};
         colorText=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,2)};
-        copyHint=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,1),Text="按 C 复制颜色值"};
+        copyHint=new TextBlock{Foreground=Brushes.White,FontSize=11,Margin=new Thickness(0,0,0,1),Text="按 C 复制颜色并结束截图"};
         var shiftHint=new TextBlock{Foreground=Brushes.White,FontSize=11,Text="按 SHIFT 切换RGB/HEX"};
         var panel=new Border{Background=new SolidColorBrush(Color.FromArgb(205,10,14,20)),CornerRadius=new CornerRadius(4),Padding=new Thickness(8,6,8,6),Child=new StackPanel{Children={coordText,colorText,copyHint,shiftHint}}};
         picker.Children.Add(preview);picker.Children.Add(panel);
@@ -632,8 +632,7 @@ sealed class CaptureWindow : Window
         var text=hexFormat?$"#{color.R:X2}{color.G:X2}{color.B:X2}":$"{color.R}, {color.G}, {color.B}";
         try{System.Windows.Clipboard.SetText(text);}catch(System.Runtime.InteropServices.COMException){}
         ActivityStore.Write("截图",message:"已复制颜色 "+text);
-        copyHint.Text="已复制到剪贴板 ✓";
-        Dispatcher.BeginInvoke(new Action(()=>{if(!selected&&!selecting)copyHint.Text="按 C 复制颜色值";}),System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Close(); // 取色完成：直接结束截图
     }
     protected override void OnClosed(EventArgs e)
     {

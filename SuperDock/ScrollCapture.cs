@@ -36,10 +36,60 @@ internal static class ScrollCapture
         cancelled=false;
         int x=(int)Math.Round(phys.Left),y=(int)Math.Round(phys.Top),w=(int)Math.Round(phys.Width),h=(int)Math.Round(phys.Height);
         w=Math.Max(16,w);h=Math.Max(16,h);
-        // HUD：进度与停止
-        Dispatcher.CurrentDispatcher.BeginInvoke(new Action(()=>ShowHud(x,y,w,h)));
+        // HUD：进度与停止；同时把选区以外全部遮罩置灰，突出滚动区域
+        Dispatcher.CurrentDispatcher.BeginInvoke(new Action(()=>{ShowMask(x,y,w,h);ShowHud(x,y,w,h);}));
         var thread=new System.Threading.Thread(()=>Loop(x,y,w,h,settings));
         thread.SetApartmentState(System.Threading.ApartmentState.STA);thread.IsBackground=true;thread.Start();
+    }
+    static Window? maskWindow;
+    // 全虚拟屏遮罩：选区留出亮色空洞，其余区域半透明置灰；鼠标穿透不干扰滚动。
+    static void ShowMask(int x,int y,int w,int h)
+    {
+        try
+        {
+            double scale=1;
+            var source=PresentationSource.FromVisual(App.Current?.MainWindow??(Window)null!);
+            if(source?.CompositionTarget!=null)scale=source.CompositionTarget.TransformToDevice.M11;
+            var mask=new Window
+            {
+                WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ResizeMode=ResizeMode.NoResize,
+                ShowInTaskbar=false,Topmost=true,ShowActivated=false,Focusable=false,IsHitTestVisible=false,
+                WindowStartupLocation=WindowStartupLocation.Manual,Title="windock · 遮罩"
+            };
+            var grid=new Grid();
+            var dim=new SolidColorBrush(Color.FromArgb(110,8,10,14));
+            // 选区四周四条暗带，选区内完全透明（亮色）
+            grid.Children.Add(new Border{Background=dim,VerticalAlignment=VerticalAlignment.Top,Height=Math.Max(0,y/scale)});
+            grid.Children.Add(new Border{Background=dim,VerticalAlignment=VerticalAlignment.Bottom,Height=Math.Max(0,(SystemParameters.VirtualScreenHeight*scale-(y+h))/scale)});
+            grid.Children.Add(new Border{Background=dim,HorizontalAlignment=HorizontalAlignment.Left,Width=Math.Max(0,x/scale),Margin=new Thickness(0,y/scale,0,0),VerticalAlignment=VerticalAlignment.Top,Height=(h)/scale});
+            grid.Children.Add(new Border{Background=dim,HorizontalAlignment=HorizontalAlignment.Right,Width=Math.Max(0,(SystemParameters.VirtualScreenWidth*scale-(x+w))/scale),Margin=new Thickness(0,y/scale,0,0),VerticalAlignment=VerticalAlignment.Top,Height=(h)/scale});
+            mask.Content=grid;
+            mask.Loaded+=(_,_)=>{
+                mask.Left=SystemParameters.VirtualScreenLeft;
+                mask.Top=SystemParameters.VirtualScreenTop;
+                mask.Width=SystemParameters.VirtualScreenWidth;
+                mask.Height=SystemParameters.VirtualScreenHeight;
+                // 鼠标穿透：WS_EX_LAYERED|WS_EX_TRANSPARENT，滚轮/点击直达下层页面
+                try
+                {
+                    var hwnd=new System.Windows.Interop.WindowInteropHelper(mask).Handle;
+                    const int gwlExStyle=-20,gwlLayered=0x00080000,gwlTransparent=0x00000020;
+                    SetWindowLong(hwnd,gwlExStyle,GetWindowLong(hwnd,gwlExStyle)|gwlLayered|gwlTransparent);
+                }
+                catch{ }
+            };
+            mask.Show();
+            maskWindow=mask;
+        }
+        catch{ }
+    }
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd,int index);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd,int index,int value);
+    static void CloseMask()
+    {
+        var mask=maskWindow;
+        mask?.Dispatcher.BeginInvoke(new Action(()=>{try{mask.Close();}catch{ }}));
+        maskWindow=null;
     }
     static void ShowHud(int x,int y,int w,int h)
     {
@@ -210,7 +260,40 @@ internal static class ScrollCapture
             lastFrame=current;
             UpdateHud(total);
         }
+        // 收尾：视口底部 padding 里的真实内容补上（排除固定边框后追加），否则长图最底下截不全
+        try
+        {
+            int chromeStart=FindChromeStart(first,lastFrame,w,h,pad);
+            int tail=chromeStart-(h-pad);
+            if(tail>0)
+            {
+                rows.Add(lastFrame.AsSpan((h-pad)*w*4,tail*w*4).ToArray());
+                UpdateHud(total+tail);
+            }
+        }
+        catch{ }
         Finish(Assemble(rows,w),settings);
+    }
+    // 固定边框（状态栏/滚动条）与首帧相同；内容行则不同。从 pad 处往下找最靠上的“整段与首帧一致”的行作为边框起点。
+    static int FindChromeStart(byte[] first,byte[] last,int w,int h,int pad)
+    {
+        int stride=w*4;
+        for(int r=h-pad;r<h;r++)
+        {
+            bool same=true;
+            for(int rr=r;rr<h&&same;rr++)
+            {
+                for(int c=0;c<stride;c+=24)
+                {
+                    int px=rr*stride+c;
+                    if(px+3>=last.Length)break;
+                    int d=first[px]-last[px]+first[px+1]-last[px+1]+first[px+2]-last[px+2];
+                    if((d<0?-d:d)>10){same=false;break;}
+                }
+            }
+            if(same)return r;
+        }
+        return h; // 未识别到边框：尾部不追加（保守，不引入错误内容）
     }
     // 直接把 WM_MOUSEWHEEL 发给光标下的顶层窗口：不依赖“悬停滚动”设置或焦点归属。
     static void SendWheel(int x,int y,int delta)
@@ -251,6 +334,7 @@ internal static class ScrollCapture
     static void Finish(BitmapSource? result,MainWindow.Settings settings)
     {
         CloseHud();
+        CloseMask();
         ui.BeginInvoke(new Action(()=>{
             if(result==null)GlassDialog.Show("滚动截图失败：无法截取屏幕区域");
             else ScrollResult.Show(result,settings);

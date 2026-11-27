@@ -1,4 +1,4 @@
-#define AppVersion "1.9.1"
+#define AppVersion "1.9.2"
 [Setup]
 AppId={{FD5D931A-CEEA-4524-9F1A-ED650EB24EAB}
 AppName=windock
