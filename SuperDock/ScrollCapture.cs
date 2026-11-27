@@ -14,6 +14,9 @@ internal static class ScrollCapture
 {
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags,int dx,int dy,uint data,UIntPtr extra);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(WheelPoint point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd,uint message,IntPtr wParam,IntPtr lParam);
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd,IntPtr hdc);
     [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -24,6 +27,7 @@ internal static class ScrollCapture
     [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst,int x,int y,int w,int h,IntPtr src,int sx,int sy,int rop);
     [StructLayout(LayoutKind.Sequential)]
     struct BitmapInfo{public int Size,Width,Height;public short Planes,BitCount;public int Compression,SizeImage,XPelsPerMeter,YPelsPerMeter,ColorsUsed,ColorsImportant;}
+    [StructLayout(LayoutKind.Sequential)]struct WheelPoint{public int X,Y;}
     static volatile bool cancelled;
     static Dispatcher ui=null!;
     public static void Run(Rect phys,MainWindow.Settings settings)
@@ -42,7 +46,8 @@ internal static class ScrollCapture
         var hud=new Window
         {
             WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ResizeMode=ResizeMode.NoResize,
-            ShowInTaskbar=false,Topmost=true,Width=300,Height=44,WindowStartupLocation=WindowStartupLocation.Manual,Title="windock · 滚动截图"
+            // 不抢焦点：HUD 拿走键盘焦点后，鼠标滚轮会发给 HUD 而不是被截取的页面（表现为“滚动只有一会”/根本不滚）
+            ShowInTaskbar=false,Topmost=true,ShowActivated=false,Focusable=false,Width=300,Height=44,WindowStartupLocation=WindowStartupLocation.Manual,Title="windock · 滚动截图"
         };
         var text=new TextBlock{Text="滚动截图中… 0 px",FontSize=12,Foreground=Theme.Text,VerticalAlignment=VerticalAlignment.Center};
         var stop=new Border{Background=new SolidColorBrush(Color.FromRgb(240,82,82)),CornerRadius=new CornerRadius(12),Height=26,Padding=new Thickness(14,0,14,0),Cursor=Cursors.Hand,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0),Child=new TextBlock{Text="停止",FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center}};
@@ -58,7 +63,6 @@ internal static class ScrollCapture
             if(ly<SystemParameters.VirtualScreenTop+8)ly=(y+h)/scale+12;
             hud.Left=Math.Clamp(lx,SystemParameters.VirtualScreenLeft+8,SystemParameters.VirtualScreenLeft+SystemParameters.VirtualScreenWidth-308);
             hud.Top=ly;
-            hud.Activate();hud.Focus();
         };
         hud.KeyDown+=(_,e)=>{if(e.Key==Key.Escape)cancelled=true;};
         hud.Show();
@@ -94,20 +98,20 @@ internal static class ScrollCapture
         }
         catch(Exception){return null;}
     }
-    // 位移匹配：在 prev 底部与 cur 顶部找最小误差的位移量 o（cur 比 prev 多滚动了 o 像素）。
-    // 采样更密（32 列 × 逐行），阈值按画面自身波动归一化：文字页面抗锯齿也会造成差异，
-    // 固定阈值会把正常滚动误判成未滚动（表现为“只滚一小会儿就停”）。
-    static int FindOffset(byte[] prev,byte[] cur,int w,int h,int maxSearch)
+    // 位移匹配（内带去边版）：prev 内容带 [pad+o, h-pad) 应与 cur 内容带 [pad, h-pad-o) 一致。
+    // o=0 恒自洽，因此从 o=1 起搜；误差小于阈值才认定真实位移。
+    static int FindOffset(byte[] prev,byte[] cur,int w,int h,int maxSearch,int pad,out double bestErrOut)
     {
         int best=0;double bestErr=double.MaxValue;
         int cols=Math.Min(w,512)/16+1;
         int stride=w*4;
-        for(int o=0;o<=maxSearch&&o<h-4;o++)
+        int lo=pad,hi=h-pad;
+        for(int o=1;o<=maxSearch&&o<hi-lo-4;o++)
         {
             double err=0;long count=0;
-            for(int r=0;r<o;r++)
+            for(int r=lo+o;r<hi;r++)
             {
-                int pr=(h-o+r)*stride,cr=r*stride;
+                int pr=r*stride,cr=(r-o)*stride;
                 for(int c=0;c<cols;c++)
                 {
                     int px=c*16*4;
@@ -120,6 +124,7 @@ internal static class ScrollCapture
             err/=count;
             if(err<bestErr){bestErr=err;best=o;}
         }
+        bestErrOut=bestErr;
         return bestErr<42?best:0;
     }
     // 帧是否一致（采样比较）：用于等待滚动动画结束（连续两帧相同才算定格）。
@@ -145,15 +150,21 @@ internal static class ScrollCapture
         var rows=new List<byte[]>();
         var first=Capture(x,y,w,h);
         if(first==null){Finish(null,settings);return;}
-        rows.Add(first);
+        // 去边内带：窗口标题栏/状态栏/滚动条等固定边框不参与匹配与拼接（否则底行永不移动，永远匹配不上）
+        int pad=Math.Min(64,Math.Max(24,h/10));
+        rows.Add(first.AsSpan(pad*w*4,(h-2*pad)*w*4).ToArray());
+        byte[] lastFrame=first;
         SetCursorPos(x+w/2,Math.Min(y+h/2,y+h-8)); // 光标放到选区内，滚轮作用于下方窗口
         System.Threading.Thread.Sleep(250);
         int total=0,idle=0;
         var sw= Stopwatch.StartNew();
         int search=Math.Min(480,h/2);
+        bool directMode=false; // mouse_event 无效时（焦点不在目标页/系统关闭悬停滚动），改用 SendMessage 直发滚轮
         while(!cancelled&&rows.Count<1200&&total<40000&&sw.ElapsedMilliseconds<180000)
         {
-            mouse_event(0x0800,0,0,unchecked((uint)(-120*2)),UIntPtr.Zero); // 滚轮下滚 2 格
+            int delta=-240; // 滚轮下滚 2 格
+            if(directMode)SendWheel(x+w/2,y+h/2,delta);
+            else mouse_event(0x0800,0,0,unchecked((uint)delta),UIntPtr.Zero);
             // 等滚动动画定格：连续两帧采样一致才继续（不等会拼出错位/重复内容）
             byte[]? current=Capture(x,y,w,h);byte[]? previous=null;int settle=0;
             while(settle<20&&!cancelled)
@@ -165,31 +176,72 @@ internal static class ScrollCapture
                 settle++;
             }
             if(current==null)break;
-            int o=FindOffset(rows[^1],current,w,h,search);
+            // 视口完全没变（到底了或页面不可滚）：帧不变就没新内容，重复内容也不能误判成滚动
+            if(SameFrame(lastFrame,current,w,h))
+            {
+                idle++;
+                if(idle>=2)break;
+                continue;
+            }
+            int o=FindOffset(lastFrame,current,w,h,search,pad,out var err);
             if(o<=1)
             {
-                // 页面没动：可能已到底。连续两个周期仍无位移才收尾，并给动画充分的余量。
+                if(!directMode) // mouse_event 一轮无位移：改用直接发送滚轮再试一次
+                {
+                    directMode=true;
+                    SendWheel(x+w/2,y+h/2,delta);
+                    System.Threading.Thread.Sleep(350);
+                    var retry=Capture(x,y,w,h);
+                    if(retry!=null)
+                    {
+                        int o2=FindOffset(lastFrame,retry,w,h,search,pad,out var err2);
+                        if(o2>1){idle=0;total+=o2;rows.Add(retry.AsSpan((h-pad-o2)*w*4,o2*w*4).ToArray());lastFrame=retry;UpdateHud(total);continue;}
+                    }
+                }
+                // 页面没动：可能已到底。连续两个周期仍无位移才收尾。
                 idle++;
+                lastFrame=current;
                 if(idle>=2)break;
                 continue;
             }
             idle=0;
             total+=o;
-            for(int r=h-o;r<h;r++)rows.Add(current.AsSpan(r*w*4,w*4).ToArray());
+            rows.Add(current.AsSpan((h-pad-o)*w*4,o*w*4).ToArray());
+            lastFrame=current;
             UpdateHud(total);
         }
-        Finish(Assemble(rows,w,h),settings);
+        Finish(Assemble(rows,w),settings);
     }
-    static BitmapSource? Assemble(List<byte[]> rows,int w,int h)
+    // 直接把 WM_MOUSEWHEEL 发给光标下的顶层窗口：不依赖“悬停滚动”设置或焦点归属。
+    static void SendWheel(int x,int y,int delta)
     {
         try
         {
-            // rows[0]=首帧（h 行），其后每行一条追加行
-            int total=h+rows.Count-1;
+            var hwnd=WindowFromPoint(new WheelPoint{X=x,Y=y});
+            if(hwnd==IntPtr.Zero)return;
+            var root=GetAncestor(hwnd,2); // GA_ROOT
+            if(root!=IntPtr.Zero)hwnd=root;
+            SendMessage(hwnd,0x020A,(IntPtr)(delta<<16),(IntPtr)((y<<16)|(x&0xFFFF)));
+        }
+        catch{ }
+    }
+    static BitmapSource? Assemble(List<byte[]> strips,int w)
+    {
+        try
+        {
+            // strips：首条=首帧内容带（h-2*pad 行），其后每条为追加的 o 行
+            int stride=w*4,total=0;
+            foreach(var s in strips)total+=s.Length/stride;
+            if(total<=0)return null;
             var result=new WriteableBitmap(w,total,96,96,PixelFormats.Bgr32,null);
             result.Lock();
-            result.WritePixels(new Int32Rect(0,0,w,h),rows[0],w*4,0);
-            for(int i=1;i<rows.Count;i++)result.WritePixels(new Int32Rect(0,h+i-1,w,1),rows[i],w*4,0);
+            int at=0;
+            foreach(var s in strips)
+            {
+                int sh=s.Length/stride;
+                result.WritePixels(new Int32Rect(0,at,w,sh),s,stride,0);
+                at+=sh;
+            }
             result.Unlock();
             result.Freeze();
             return result;

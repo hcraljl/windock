@@ -59,7 +59,7 @@ sealed class TodoReminder : Window
             chip.Child=new TextBlock{Text=(overdue?"已到提醒时间 · ":"提醒 ")+item.RemindAt.ToString("MM/dd HH:mm"),FontSize=10.5,Foreground=overdue?Theme.Get("ThemeDanger"):Theme.Muted};
             body.Children.Add(chip);
             var check=ActionButton("\uE73E",()=>{
-                item.Done=true;changed();Refresh();
+                item.Done=true;item.DoneAt=DateTime.Now;changed();Refresh();
                 if(due.All(d=>d.Done))Close();
             },GlassWindow.Surface);
             check.Width=28;check.Height=28;check.Padding=new Thickness(0);check.FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets");check.FontSize=13;check.ToolTip="标记完成";check.Margin=new Thickness(0,1,0,0);

@@ -27,7 +27,7 @@ internal sealed class AnnotationLayer : Canvas
     public Rect? WatermarkBounds{get=>watermarkBounds;set{watermarkBounds=value;if(watermarkTile.Visibility==Visibility.Visible)RefreshWatermark();}}
     // 水印自动生效：选中文本非空时立即铺满；切换到其他工具后保留，撤销/清空才移除。
     bool watermarkApplied;
-    double watermarkJitterX,watermarkJitterY; // 每次重新生效时随机偏移，避免每次都从同一位置平铺
+    (double Fx,double Fy)[] watermarkSpots=[]; // 两个水印实例的随机位置（区域内相对比例）
     public bool WatermarkApplied=>watermarkApplied&&!string.IsNullOrWhiteSpace(watermarkTextValue);
     public event Action? Changed;
     public event Action? ColorChanged;
@@ -82,30 +82,38 @@ internal sealed class AnnotationLayer : Canvas
         if(region.Width<8||region.Height<8){watermarkTile.Visibility=Visibility.Collapsed;return;}
         double ppd=1;try{ppd=VisualTreeHelper.GetDpi(this).PixelsPerDip;}catch{}
         var face=new Typeface(new FontFamily("Microsoft YaHei UI, Segoe UI"),FontStyles.Normal,FontWeights.SemiBold,FontStretches.Normal);
-        var ft=new FormattedText(watermarkTextValue,System.Globalization.CultureInfo.CurrentCulture,FlowDirection.LeftToRight,face,26,new SolidColorBrush(watermarkColor),ppd);
+        var ft=new FormattedText(watermarkTextValue,System.Globalization.CultureInfo.CurrentCulture,FlowDirection.LeftToRight,face,16,new SolidColorBrush(watermarkColor),ppd);
         var geo=ft.BuildGeometry(new Point(0,0));
         var bounds=geo.Bounds;
         var rotation=new RotateTransform(-30,bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2);
-        double minX=double.MaxValue,minY=double.MaxValue,maxX=double.MinValue,maxY=double.MinValue;
-        foreach(var corner in new[]{new Point(bounds.Left,bounds.Top),new Point(bounds.Right,bounds.Top),new Point(bounds.Left,bounds.Bottom),new Point(bounds.Right,bounds.Bottom)})
+        // 重新生效时随机选两个位置（区域内相对比例），字体更小、数量更少
+        if(!wasApplied&&watermarkApplied)
         {
-            var p=rotation.Transform(corner);
-            minX=Math.Min(minX,p.X);minY=Math.Min(minY,p.Y);maxX=Math.Max(maxX,p.X);maxY=Math.Max(maxY,p.Y);
+            var random=System.Random.Shared;
+            watermarkSpots=new[]
+            {
+                (0.15+random.NextDouble()*.3,0.12+random.NextDouble()*.35),
+                (0.45+random.NextDouble()*.35,0.45+random.NextDouble()*.4)
+            };
         }
-        double padX=260,padY=170; // 稀疏排布：实例间留大间隙
-        var group=new DrawingGroup
+        var group=new DrawingGroup();
+        foreach(var(fx,fy) in watermarkSpots)
         {
-            Transform=new TransformGroup{Children={rotation,new TranslateTransform(padX/2-minX,padY/2-minY)}},
-            Children={new GeometryDrawing{Geometry=geo,Brush=new SolidColorBrush(watermarkColor)}}
-        };
-        double stepX=(maxX-minX)+padX,stepY=(maxY-minY)+padY;
-        if(!wasApplied&&watermarkApplied) // 重新生效时随机偏移平铺起点
-        {
-            watermarkJitterX=System.Random.Shared.NextDouble()*stepX;
-            watermarkJitterY=System.Random.Shared.NextDouble()*stepY;
+            var instance=new DrawingGroup
+            {
+                Transform=new TransformGroup
+                {
+                    Children=
+                    {
+                        new RotateTransform(-30,bounds.X+bounds.Width/2,bounds.Y+bounds.Height/2),
+                        new TranslateTransform(fx*region.Width-(bounds.X+bounds.Width/2),fy*region.Height-(bounds.Y+bounds.Height/2))
+                    }
+                },
+                Children={new GeometryDrawing{Geometry=geo,Brush=new SolidColorBrush(watermarkColor)}}
+            };
+            group.Children.Add(instance);
         }
-        // 用 Viewport 负原点整体平移瓦片网格：文字始终完整落在单元格内，不会被裁切
-        watermarkTile.Fill=new DrawingBrush{Drawing=group,TileMode=TileMode.Tile,Viewport=new Rect(-watermarkJitterX,-watermarkJitterY,stepX,stepY),ViewportUnits=BrushMappingMode.Absolute,Opacity=watermarkOpacity};
+        watermarkTile.Fill=new DrawingBrush{Drawing=group,Opacity=watermarkOpacity};
         SetLeft(watermarkTile,region.Left);SetTop(watermarkTile,region.Top);
         watermarkTile.Width=region.Width;watermarkTile.Height=region.Height;
         watermarkTile.Clip=new RectangleGeometry(new Rect(0,0,region.Width,region.Height));

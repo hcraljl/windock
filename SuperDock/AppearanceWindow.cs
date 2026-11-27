@@ -60,6 +60,10 @@ internal sealed partial class AppearanceWindow : Window
     static Brush RailBg=>Theme.Dark?W("#2E3532"):W("#DCE2DA"); // 鼠尾草绿侧栏
     static Brush TrackBg=>Theme.Dark?W("#3A4440"):W("#E4EAE2");
     static Brush NavSelected=>Theme.Dark?W("#31413E"):W("#3A4A47"); // 侧栏选中块：深石板绿、白字
+    static Brush AmberBg=>Theme.Dark?W("#463A24"):W("#FBF1DC"); // 已完成卡片的琥珀色底/徽标（手账风）
+    static Brush AmberFg=>Theme.Dark?W("#E3B96A"):W("#C08A2D");
+    static Brush AmberBorder=>Theme.Dark?W("#5A4B2C"):W("#EED9B4");
+    static Brush Amber=>Theme.Dark?W("#D9A84E"):W("#D9A84E");
     void ApplyGlassResources()
     {
         // 窗口级覆写共享样式里的 DynamicResource，只影响设置工作台，不污染全局主题
@@ -448,8 +452,35 @@ internal sealed partial class AppearanceWindow : Window
 
         content.Children.Add(new Expander{Header="数据说明",Margin=new Thickness(0,12,0,0),Content=Text("GPU 为最繁忙引擎占用；网络包含虚拟网卡；天气为模型估算。",11)});
     }
+    string todoQuery="",todoFilter="全部";
+    StackPanel todoGrid=new();
     void Todos()
     {
+        // —— 统计卡：大数字 + 细进度条 + 距完成提示（参考手账风）——
+        var items=settings.Todos.Where(i=>i!=null).ToList();
+        int total=items.Count,doneCount=items.Count(i=>i.Done),pendingCount=total-doneCount;
+        var countRow=new StackPanel{Orientation=Orientation.Horizontal};
+        countRow.Children.Add(new TextBlock{Text=doneCount.ToString(),FontFamily=new FontFamily("Georgia, SimSun, Microsoft YaHei UI"),FontSize=30,FontWeight=FontWeights.SemiBold,Foreground=Ink,VerticalAlignment=VerticalAlignment.Bottom});
+        countRow.Children.Add(new TextBlock{Text=$" / {total} 件待办",FontSize=12.5,Foreground=Muted,VerticalAlignment=VerticalAlignment.Bottom,Margin=new Thickness(5,0,0,6)});
+        var track=new Border{Height=5,CornerRadius=new CornerRadius(3),Background=TrackBg,MinWidth=120,VerticalAlignment=VerticalAlignment.Center};
+        var fill=new Border{CornerRadius=new CornerRadius(3),Background=new SolidColorBrush(Theme.Dark?Color.FromRgb(122,144,176):Color.FromRgb(107,127,163)),HorizontalAlignment=HorizontalAlignment.Left,Width=0};
+        track.Child=fill;
+        var percent=new TextBlock{FontSize=10.5,Foreground=Muted,Margin=new Thickness(0,5,0,0)};
+        track.SizeChanged+=(_,_)=>{fill.Width=Math.Max(0,track.ActualWidth*(total==0?0:Math.Min(1,(double)doneCount/total)));percent.Text=$"{(total==0?0:doneCount*100/Math.Max(1,total))}%";};
+        var barCol=new StackPanel{Margin=new Thickness(22,0,18,0),VerticalAlignment=VerticalAlignment.Center};
+        barCol.Children.Add(track);barCol.Children.Add(percent);
+        var todayPending=items.Count(i=>!i.Done&&i.RemindAt.Date==DateTime.Today);
+        var badge=new Border{CornerRadius=new CornerRadius(14),Background=TrackBg,Padding=new Thickness(12,5,12,5),VerticalAlignment=VerticalAlignment.Center,Child=new TextBlock{Text=todayPending==0?"今日无提醒":$"今日提醒 {todayPending} 件",FontSize=11.5,Foreground=Ink}};
+        var right=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
+        right.Children.Add(new TextBlock{Text=pendingCount==0?"全部完成，慢慢来。":$"距「全部完成」还差 {pendingCount} 件",FontSize=11.5,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0),MaxWidth=150,TextAlignment=TextAlignment.Right,TextWrapping=TextWrapping.Wrap});
+        right.Children.Add(badge);
+        var summaryGrid=new Grid();
+        summaryGrid.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        summaryGrid.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        summaryGrid.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        Grid.SetColumn(countRow,0);Grid.SetColumn(barCol,1);Grid.SetColumn(right,2);
+        summaryGrid.Children.Add(countRow);summaryGrid.Children.Add(barCol);summaryGrid.Children.Add(right);
+        content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(16),Padding=new Thickness(18,16,16,16),Margin=new Thickness(0,2,0,12),Child=summaryGrid});
         // —— 添加待办：内容输入 + 日期/时间选择 ——
         Heading("添加待办");
         var input=new TextBox{Height=38,FontSize=13,Padding=new Thickness(12,4,12,4),VerticalContentAlignment=VerticalAlignment.Center};
@@ -483,44 +514,170 @@ internal sealed partial class AppearanceWindow : Window
         var editor=new StackPanel{Children={input,pickers}};
         content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(0),CornerRadius=new CornerRadius(16),Padding=new Thickness(14,12,12,12),Margin=new Thickness(6,4,6,10),Child=editor});
         content.Children.Add(Text("支持未来一周内 · 到点弹窗提醒未完成事项",11));
-        // —— 未完成列表 ——
-        var pending=settings.Todos.Where(item=>item!=null&&!item.Done).OrderBy(item=>item.RemindAt).ToList();
-        var finished=settings.Todos.Where(item=>item!=null&&item.Done).OrderBy(item=>item.RemindAt).ToList();
-        Heading(pending.Count==0?"未完成":$"未完成 · {pending.Count}");
-        if(settings.Todos.Count==0)
+        // —— 搜索 + 状态筛选 ——
+        var searchBox=new TextBox{Height=34,FontSize=12.5,VerticalContentAlignment=VerticalAlignment.Center,Text=todoQuery,ToolTip="搜索待办内容（Ctrl+F 定位）"};
+        var filter=new ComboBox{Width=112,Height=34,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5,Margin=new Thickness(10,0,0,0)};
+        foreach(var option in new[]{"全部","未完成","已完成"})filter.Items.Add(new ComboBoxItem{Content=option});
+        filter.SelectedItem=filter.Items.Cast<ComboBoxItem>().First(i=>i.Content as string==todoFilter);
+        searchBox.TextChanged+=(_,_)=>{todoQuery=searchBox.Text;RefreshTodoGrid();};
+        filter.SelectionChanged+=(_,_)=>{if(filter.SelectedItem is ComboBoxItem sel&&sel.Content is string s){todoFilter=s;RefreshTodoGrid();}};
+        var searchRow=new Grid{Margin=new Thickness(0,2,0,0)};
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        Grid.SetColumn(filter,1);
+        searchRow.Children.Add(searchBox);searchRow.Children.Add(filter);
+        content.Children.Add(searchRow);
+        // —— 分组卡片网格（手账风：№ 编号 / 状态徽标 / 日期）——
+        todoGrid=new StackPanel();
+        content.Children.Add(todoGrid);
+        RefreshTodoGrid();
+    }
+    // —— 手账风卡片网格：№ 编号 / 状态徽标 / 日期，点击卡片进详情 ——
+    void RefreshTodoGrid()
+    {
+        todoGrid.Children.Clear();
+        var all=settings.Todos.Where(i=>i!=null).ToList();
+        if(all.Count==0){todoGrid.Children.Add(TodoHintCard("暂无待办 · 添加后到点会自动弹窗提醒"));return;}
+        var matched=all.Where(i=>i.Text.Contains(todoQuery,StringComparison.OrdinalIgnoreCase));
+        if(todoFilter=="未完成")matched=matched.Where(i=>!i.Done);else if(todoFilter=="已完成")matched=matched.Where(i=>i.Done);
+        var list=matched.ToList();
+        if(list.Count==0){todoGrid.Children.Add(TodoHintCard("没有匹配的待办 · 换个关键词或筛选试试"));return;}
+        var now=DateTime.Now;
+        var pending=list.Where(i=>!i.Done).OrderBy(i=>i.RemindAt).ToList();
+        var finished=list.Where(i=>i.Done).OrderBy(i=>i.DoneAt??i.RemindAt).ToList();
+        var groups=new List<(string Title,List<MainWindow.TodoItem> Items)>();
+        var overdueItems=pending.Where(i=>i.RemindAt<now).ToList();
+        if(overdueItems.Count>0)groups.Add(("已过期",overdueItems));
+        foreach(var g in pending.Where(i=>i.RemindAt>=now).GroupBy(i=>i.RemindAt.Date).OrderBy(g=>g.Key))
+            groups.Add((g.Key==now.Date?"今天":g.Key==now.Date.AddDays(1)?"明天":g.Key.ToString("MM月dd日 · 周ddd"),g.ToList()));
+        if(finished.Count>0)groups.Add(("已完成",finished));
+        foreach(var(title,groupItems) in groups)
         {
-            var empty=new Border{Background=SettingsCard,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(0),CornerRadius=new CornerRadius(16),Padding=new Thickness(16,18,16,18),Margin=new Thickness(6,0,6,8),Child=new TextBlock{Text="暂无待办 · 添加后到点会自动弹窗提醒",FontSize=12,Foreground=Muted,TextAlignment=TextAlignment.Center,LineHeight=20}};
-            content.Children.Add(empty);
-        }
-        foreach(var item in pending)content.Children.Add(TodoRow(item,true));
-        if(finished.Count>0)
-        {
-            Heading($"已完成 · {finished.Count}");
-            foreach(var item in finished)content.Children.Add(TodoRow(item,false));
-            content.Children.Add(Text("已完成的待办可继续保留或删除，不影响未完成事项的提醒。",11));
+            // 分组标题：文字 + 细线（手账风的“校园时光 ———”）
+            var header=new DockPanel{Margin=new Thickness(0,18,0,4),LastChildFill=true};
+            header.Children.Add(new TextBlock{Text=title,FontSize=12,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center});
+            header.Children.Add(new Border{Height=1,Background=Stroke,Margin=new Thickness(12,0,0,0)});
+            todoGrid.Children.Add(header);
+            var wrap=new WrapPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(-4,4,-4,0)};
+            foreach(var groupItem in groupItems)wrap.Children.Add(TodoCard(groupItem));
+            todoGrid.Children.Add(wrap);
         }
     }
-    // 待办行卡片：左侧完成切换、中间内容与时间徽标（过期高亮）、右侧删除。
-    FrameworkElement TodoRow(MainWindow.TodoItem item,bool pending)
+    FrameworkElement TodoHintCard(string text)=>new Border{Background=SettingsCard,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(0),CornerRadius=new CornerRadius(16),Padding=new Thickness(16,18,16,18),Margin=new Thickness(0,10,0,8),Child=new TextBlock{Text=text,FontSize=12,Foreground=Muted,TextAlignment=TextAlignment.Center,LineHeight=20}};
+    FrameworkElement TodoCard(MainWindow.TodoItem item)
     {
-        var body=new StackPanel{Margin=new Thickness(12,0,8,0)};
-        body.Children.Add(new TextBlock{Text=item.Text,FontSize=13.5,FontWeight=pending?FontWeights.Medium:FontWeights.Normal,Foreground=pending?Ink:Muted,TextWrapping=TextWrapping.Wrap,TextDecorations=pending?null:System.Windows.TextDecorations.Strikethrough});
-        bool overdue=pending&&item.RemindAt<DateTime.Now;
-        var chip=new Border{CornerRadius=new CornerRadius(7),Padding=new Thickness(7,2,7,2),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,0),Background=overdue?Theme.Get("ThemeDanger"):CardBg,Child=new TextBlock{Text=(overdue?"已过提醒时间 · ":"提醒 ")+item.RemindAt.ToString("MM/dd HH:mm"),FontSize=10.5,Foreground=overdue?Theme.Get("ThemeDanger"):Muted}};
-        body.Children.Add(chip);
-        var toggle=new Button{Content=new TextBlock{Text=pending?"✓":"",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=13,Foreground=pending?Muted:Ink},Style=(Style)FindResource("GlassButton"),Width=28,Height=28,Padding=new Thickness(0),Background=pending?Brushes.Transparent:CardBg,VerticalAlignment=VerticalAlignment.Center,ToolTip=pending?"标记为未完成":"标记完成"};
-        toggle.Click+=(_,_)=>{item.Done=!item.Done;changed();Navigate(page);};
-        var remove=new Button{Content=new TextBlock{Text="",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=12,Foreground=Muted},Style=(Style)FindResource("GlassButton"),Width=28,Height=28,Padding=new Thickness(0),Background=Brushes.Transparent,VerticalAlignment=VerticalAlignment.Center,ToolTip="删除"};
-        remove.Click+=(_,_)=>{settings.Todos.Remove(item);changed();Navigate(page);};
-        var row=new Grid{Opacity=pending?1:.72};
-        row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
-        row.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
-        row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
-        Grid.SetColumn(toggle,0);Grid.SetColumn(body,1);Grid.SetColumn(remove,2);
-        row.Children.Add(toggle);row.Children.Add(body);row.Children.Add(remove);
-        var card=new Border{Background=SettingsCard,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(0),CornerRadius=new CornerRadius(16),Padding=new Thickness(10,9,8,9),Margin=new Thickness(6,0,6,8),Child=row};
-        card.MouseEnter+=(_,_)=>card.Background=Theme.Get("ThemeHover");
-        card.MouseLeave+=(_,_)=>card.Background=SettingsCard;
+        int number=settings.Todos.IndexOf(item)+1;
+        bool done=item.Done;
+        bool overdue=!done&&item.RemindAt<DateTime.Now;
+        var chip=new Border{CornerRadius=new CornerRadius(8),Padding=new Thickness(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Left,Background=done?AmberBg:overdue?W(Theme.Dark?"#4A2C28":"#FBE3DE"):TrackBg};
+        chip.Child=new TextBlock{Text=done?"已经完成":overdue?"已过提醒":"待办中",FontSize=10.5,Foreground=done?AmberFg:overdue?Theme.Get("ThemeDanger"):Muted};
+        var date=new TextBlock{Text=(done?item.DoneAt??item.RemindAt:item.RemindAt).ToString("yy.MM.dd"),FontSize=10.5,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center};
+        var bottom=new DockPanel{LastChildFill=false,Margin=new Thickness(0,10,0,0)};
+        DockPanel.SetDock(date,Dock.Right);
+        bottom.Children.Add(date);bottom.Children.Add(chip);
+        var body=new StackPanel{Margin=new Thickness(0,8,0,0)};
+        body.Children.Add(new TextBlock{Text=item.Text,FontSize=13.5,FontWeight=FontWeights.Medium,Foreground=done?Muted:Ink,TextWrapping=TextWrapping.Wrap,TextDecorations=done?System.Windows.TextDecorations.Strikethrough:null,MaxHeight=42,TextTrimming=TextTrimming.CharacterEllipsis});
+        body.Children.Add(bottom);
+        var circle=new Border{Width=15,Height=15,CornerRadius=new CornerRadius(8),VerticalAlignment=VerticalAlignment.Center,Cursor=Cursors.Hand,ToolTip=done?"标记为未完成":"标记完成"};
+        if(done){circle.Background=Amber;circle.Child=new TextBlock{Text="✓",FontSize=9,Foreground=Brushes.White,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};}
+        else{circle.BorderBrush=Muted;circle.BorderThickness=new Thickness(1.4);}
+        circle.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;item.Done=!item.Done;item.DoneAt=item.Done?DateTime.Now:null;if(!item.Done)item.Notified=false;changed();Navigate(page);};
+        var head=new DockPanel{LastChildFill=false};
+        head.Children.Add(new TextBlock{Text=$"№ {number:D3}",FontSize=11,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center});
+        head.Children.Add(circle);
+        var card=new Border{Background=SettingsCard,BorderBrush=done?AmberBorder:Stroke,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(13),Padding=new Thickness(12,10,12,10),Margin=new Thickness(4,4,4,4),Width=262,Cursor=Cursors.Hand,Child=new StackPanel{Children={head,body}}};
+        card.MouseEnter+=(_,_)=>card.BorderBrush=done?Amber:Accent;
+        card.MouseLeave+=(_,_)=>card.BorderBrush=done?AmberBorder:Stroke;
+        card.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;OpenTodoEditor(item);};
         return card;
+    }
+    // —— 待办详情编辑（参考手账风弹窗）：状态胶囊 + 提醒时间 + 一句话记录 ——
+    void OpenTodoEditor(MainWindow.TodoItem item)
+    {
+        int number=settings.Todos.IndexOf(item)+1;
+        Theme.Apply(settings.ThemeMode);
+        var window=new Window{Title="待办详情",WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ResizeMode=ResizeMode.NoResize,ShowInTaskbar=false,Topmost=true,Width=408,SizeToContent=SizeToContent.Height,MaxHeight=Math.Max(420,SystemParameters.WorkArea.Height-60),WindowStartupLocation=WindowStartupLocation.CenterOwner,FontFamily=new FontFamily("Segoe UI, Microsoft YaHei UI"),UseLayoutRounding=true};
+        GlassWindow.Prepare(window,18);
+        var shell=new Border{CornerRadius=new CornerRadius(18),BorderThickness=new Thickness(1),BorderBrush=Stroke,Background=GlassWindow.Surface,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=24,ShadowDepth=5,Opacity=.3}};
+        var body=new StackPanel{Margin=new Thickness(22,18,22,20)};shell.Child=body;window.Content=shell;
+        var head=new Grid{Margin=new Thickness(0,0,0,2)};
+        head.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(1,GridUnitType.Star)});
+        head.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        var headStack=new StackPanel();
+        headStack.Children.Add(new TextBlock{Text=$"№ {number:D3}",FontSize=11,Foreground=Muted});
+        var titleBox=new TextBox{Text=item.Text,FontSize=16,FontWeight=FontWeights.SemiBold,Foreground=Ink,Background=Brushes.Transparent,BorderThickness=new Thickness(0,0,0,1),BorderBrush=TrackBg,Padding=new Thickness(0,6,0,4),Margin=new Thickness(0,3,0,0),TextWrapping=TextWrapping.Wrap};
+        headStack.Children.Add(titleBox);
+        Grid.SetColumn(headStack,0);
+        var close=new Button{Content="✕",Width=26,Height=26,Background=Brushes.Transparent,BorderThickness=new Thickness(0),Foreground=Muted,FontSize=12,Cursor=Cursors.Hand,Padding=new Thickness(0),VerticalAlignment=VerticalAlignment.Top,ToolTip="关闭"};
+        close.Click+=(_,_)=>window.Close();
+        Grid.SetColumn(close,1);head.Children.Add(headStack);head.Children.Add(close);
+        body.Children.Add(head);
+        TextBlock FieldLabel(string text)=>new(){Text=text,FontSize=11,Foreground=Muted,Margin=new Thickness(0,16,0,8)};
+        // 状态胶囊：待办中 / 已完成
+        body.Children.Add(FieldLabel("状态"));
+        bool done=item.Done;
+        var pills=new StackPanel{Orientation=Orientation.Horizontal};
+        var pendingPill=new Border{CornerRadius=new CornerRadius(9),Padding=new Thickness(15,7,15,7),Margin=new Thickness(0,0,10,0),BorderThickness=new Thickness(1),Cursor=Cursors.Hand};
+        var donePill=new Border{CornerRadius=new CornerRadius(9),Padding=new Thickness(15,7,15,7),BorderThickness=new Thickness(1),Cursor=Cursors.Hand};
+        void PaintPills()
+        {
+            pendingPill.Background=!done?Wash:Brushes.Transparent;pendingPill.BorderBrush=!done?Accent:Stroke;
+            ((TextBlock)pendingPill.Child).Foreground=!done?Accent:Muted;
+            donePill.Background=done?AmberBg:Brushes.Transparent;donePill.BorderBrush=done?AmberBorder:Stroke;
+            ((TextBlock)donePill.Child).Foreground=done?AmberFg:Muted;
+        }
+        pendingPill.Child=new TextBlock{Text="待办中",FontSize=12.5};
+        donePill.Child=new TextBlock{Text="已完成",FontSize=12.5};
+        pendingPill.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;done=false;PaintPills();};
+        donePill.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;done=true;PaintPills();};
+        PaintPills();
+        pills.Children.Add(pendingPill);pills.Children.Add(donePill);
+        body.Children.Add(pills);
+        // 提醒时间：日期 + 时刻（与添加表单一致，预选当前值）
+        body.Children.Add(FieldLabel("提醒时间"));
+        var pickers=new StackPanel{Orientation=Orientation.Horizontal};
+        var day=new ComboBox{Width=132,Height=34,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5,Margin=new Thickness(0,0,8,0)};
+        var time=new ComboBox{Width=104,Height=34,VerticalContentAlignment=VerticalAlignment.Center,FontSize=12.5};
+        var today=DateTime.Today;
+        for(int offset=0;offset<7;offset++){var d=today.AddDays(offset);day.Items.Add(new ComboBoxItem{Content=offset==0?"今天":offset==1?"明天":d.ToString("周ddd"),Tag=d});}
+        var slots=new List<DateTime>();
+        for(int hour=0;hour<24;hour++)foreach(var minute in new[]{0,30})slots.Add(new DateTime(today.Year,today.Month,today.Day,hour,minute,0));
+        foreach(var slot in slots)time.Items.Add(new ComboBoxItem{Content=slot.ToString("HH:mm"),Tag=slot});
+        var remind=item.RemindAt;
+        day.SelectedIndex=Math.Clamp((remind.Date-today).Days,0,6);
+        int slotIndex=Math.Clamp((int)Math.Round((remind.Hour*60+remind.Minute)/30.0),0,47);
+        time.SelectedIndex=slotIndex;
+        pickers.Children.Add(day);pickers.Children.Add(time);
+        body.Children.Add(pickers);
+        // 一句话记录
+        body.Children.Add(FieldLabel("一句话记录"));
+        var note=new TextBox{AcceptsReturn=true,TextWrapping=TextWrapping.Wrap,Height=72,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,FontSize=12.5,Text=item.Note??""};
+        body.Children.Add(note);
+        // 底部：删除 / 取消 / 保存记录
+        var footer=new DockPanel{LastChildFill=false,Margin=new Thickness(0,18,0,0)};
+        var remove=new Border{CornerRadius=new CornerRadius(9),Padding=new Thickness(11,7,11,7),BorderBrush=Stroke,BorderThickness=new Thickness(1),Cursor=Cursors.Hand,VerticalAlignment=VerticalAlignment.Center,Child=new TextBlock{Text="删除这条待办",FontSize=12,Foreground=Muted}};
+        remove.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;settings.Todos.Remove(item);changed();window.Close();Navigate(page);};
+        var cancel=new Border{CornerRadius=new CornerRadius(9),Padding=new Thickness(15,7,15,7),BorderBrush=Stroke,BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(0,0,10,0),Child=new TextBlock{Text="取消",FontSize=12.5,Foreground=Ink}};
+        cancel.MouseLeftButtonUp+=(_,e)=>{e.Handled=true;window.Close();};
+        var save=new Border{CornerRadius=new CornerRadius(9),Padding=new Thickness(17,7,17,7),Background=Ink,Cursor=Cursors.Hand,Child=new TextBlock{Text="保存记录",FontSize=12.5,Foreground=PageBg}};
+        save.MouseLeftButtonUp+=(_,e)=>{
+            e.Handled=true;
+            var text=titleBox.Text.Trim();if(text.Length>0)item.Text=text;
+            item.Done=done;
+            item.DoneAt=done?(item.DoneAt??DateTime.Now):null;
+            if(!done)item.Notified=false; // 改回待办后允许再次提醒
+            if(day.SelectedItem is ComboBoxItem d&&d.Tag is DateTime date&&time.SelectedItem is ComboBoxItem t&&t.Tag is DateTime slot)
+                item.RemindAt=new DateTime(date.Year,date.Month,date.Day,slot.Hour,slot.Minute,0);
+            item.Note=note.Text;
+            changed();window.Close();Navigate(page);
+        };
+        var actions=new StackPanel{Orientation=Orientation.Horizontal};
+        actions.Children.Add(cancel);actions.Children.Add(save);
+        DockPanel.SetDock(actions,Dock.Right);
+        footer.Children.Add(actions);footer.Children.Add(remove);
+        body.Children.Add(footer);
+        window.KeyDown+=(_,e)=>{if(e.Key==Key.Escape)window.Close();};
+        window.Owner=this;
+        window.ShowDialog();
     }
 }

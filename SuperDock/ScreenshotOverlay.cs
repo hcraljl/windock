@@ -97,6 +97,9 @@ sealed class CaptureWindow : Window
             // 遮罩是 Canvas 内的 Border，必须显式设定尺寸（Canvas 不拉伸子元素），否则永远不会渲染。
             dim.Width=Width;dim.Height=Height;};
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape){Close();e.Handled=true;}else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}};
+        // 键盘事件可能落不到覆盖层（F1 后前台被其他应用占住时 Activate 失败）——
+        // 用低级键盘钩子兜底，保证 C/SHIFT/ESC/ENTER 在整个截图会话内可用（模态）。
+        Loaded+=(_,_)=>EnsureKeyHook();
         PreviewKeyDown+=(_,e)=>{
             if(layer.IsTyping)return;
             if(e.Key==Key.Escape&&layer.SelectedShape!=null){layer.Deselect();e.Handled=true;}
@@ -104,12 +107,7 @@ sealed class CaptureWindow : Window
             else if(e.Key==Key.Enter&&selected&&!translateMode){CopySelection();e.Handled=true;}
             else if(e.Key==Key.C&&!selected&&!selecting&&hoverColor is { } color) // 取色：C 复制当前颜色
             {
-                var text=hexFormat?$"#{color.R:X2}{color.G:X2}{color.B:X2}":$"{color.R}, {color.G}, {color.B}";
-                try{System.Windows.Clipboard.SetText(text);}catch(System.Runtime.InteropServices.COMException){}
-                ActivityStore.Write("截图",message:"已复制颜色 "+text);
-                copyHint.Text="已复制到剪贴板 ✓";
-                Dispatcher.BeginInvoke(new Action(()=>{if(!selected&&!selecting)copyHint.Text="按 C 复制颜色值";}),System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-                e.Handled=true;
+                CopyColor(color);e.Handled=true;
             }
             else if((e.Key==Key.LeftShift||e.Key==Key.RightShift)&&!e.IsRepeat&&!selected&&!selecting){hexFormat=!hexFormat;if(lastHover!=null)UpdateColorPanel(lastHover.Value);e.Handled=true;}
         };
@@ -580,9 +578,67 @@ sealed class CaptureWindow : Window
             if(!IsActive){Topmost=false;Topmost=true;Activate();} // Windows 前台锁定时强制置顶抡焦点，避免"按了没反应"
         }));
     }
+    // —— 截图会话低级键盘钩子：不依赖窗口焦点 ——
+    static IntPtr keyHook;static KeyboardHookProc? keyHookProc;
+    delegate IntPtr KeyboardHookProc(int code,IntPtr wParam,IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)]struct KbdLlHookStruct{public uint VkCode,ScanCode,Flags,Time;public UIntPtr ExtraInfo;}
+    [DllImport("user32.dll")]static extern IntPtr SetWindowsHookEx(int id,KeyboardHookProc proc,IntPtr mod,uint thread);
+    [DllImport("user32.dll")]static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")]static extern IntPtr CallNextHookEx(IntPtr hook,int code,IntPtr wParam,IntPtr lParam);
+    static void EnsureKeyHook()
+    {
+        if(keyHook!=IntPtr.Zero)return;
+        keyHookProc=(code,wParam,lParam)=>
+        {
+            const int wmKeyDown=0x0100,wmSysKeyDown=0x0104;
+            if(code>=0&&(wParam==(IntPtr)wmKeyDown||wParam==(IntPtr)wmSysKeyDown)&&Screenshot.Capturing is CaptureWindow active)
+            {
+                try
+                {
+                    var info=(KbdLlHookStruct)Marshal.PtrToStructure(lParam,typeof(KbdLlHookStruct))!;
+                    if(active.HandleCaptureKey(info.VkCode))return (IntPtr)1; // 模态会话内吞掉按键
+                }
+                catch{ }
+            }
+            return CallNextHookEx(keyHook,code,wParam,lParam);
+        };
+        keyHook=SetWindowsHookEx(13,keyHookProc,IntPtr.Zero,0); // WH_KEYBOARD_LL
+    }
+    static void ReleaseKeyHook()
+    {
+        if(keyHook==IntPtr.Zero)return;
+        UnhookWindowsHookEx(keyHook);keyHook=IntPtr.Zero;
+    }
+    // 返回 true 表示按键已被截图会话消费（调用方会吞掉该事件）。
+    internal bool HandleCaptureKey(uint vk)
+    {
+        if(layer.IsTyping)return false; // 文字输入中：交给输入框
+        switch(vk)
+        {
+            case 0x1B: // ESC：取消图形选中 / 退出截图
+                if(layer.SelectedShape!=null){layer.Deselect();return true;}
+                Close();return true;
+            case 0x43 when !selected&&!selecting&&hoverColor is { } color: // C：复制颜色
+                CopyColor(color);return true;
+            case 0x10 when !selected&&!selecting: // SHIFT：切换 RGB/HEX
+                hexFormat=!hexFormat;if(lastHover!=null)UpdateColorPanel(lastHover.Value);return true;
+            case 0x0D when selected&&!translateMode: // ENTER：复制选区
+                CopySelection();return true;
+        }
+        return false;
+    }
+    void CopyColor(Color color)
+    {
+        var text=hexFormat?$"#{color.R:X2}{color.G:X2}{color.B:X2}":$"{color.R}, {color.G}, {color.B}";
+        try{System.Windows.Clipboard.SetText(text);}catch(System.Runtime.InteropServices.COMException){}
+        ActivityStore.Write("截图",message:"已复制颜色 "+text);
+        copyHint.Text="已复制到剪贴板 ✓";
+        Dispatcher.BeginInvoke(new Action(()=>{if(!selected&&!selecting)copyHint.Text="按 C 复制颜色值";}),System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
+        ReleaseKeyHook();
         owner.Dispatcher.BeginInvoke(new Action(()=>owner.RestoreFromCapture()));
     }
 }

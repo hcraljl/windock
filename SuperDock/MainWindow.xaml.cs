@@ -97,10 +97,13 @@ public partial class MainWindow : Window
     public sealed class TodoItem
     {
         public string Text { get; set; } = "";
-        public DateTime RemindAt { get; set; }
+        public DateTime RemindAt { get; set; } = DateTime.Now;
         public bool Done { get; set; }
         // 每条待办到达提醒时间只弹窗一次；“稍后提醒”会把 Notified 复位并顺延时间。
         public bool Notified { get; set; }
+        // 详情记录（参考 WorkBuddy 手账风）：完成日期与一句话记录，可选。
+        public DateTime? DoneAt { get; set; }
+        public string Note { get; set; } = "";
     }
     readonly string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SuperDock", "settings.json");
     Settings settings = new();
@@ -306,6 +309,7 @@ public partial class MainWindow : Window
         settings.Todos ??= [];
         settings.Todos.RemoveAll(item => item == null || string.IsNullOrWhiteSpace(item.Text));
         foreach (var todo in settings.Todos) if (todo.RemindAt.Kind == DateTimeKind.Unspecified) todo.RemindAt = DateTime.SpecifyKind(todo.RemindAt, DateTimeKind.Local);
+        foreach (var todo in settings.Todos) if (todo.Done && todo.DoneAt == null) todo.DoneAt = todo.RemindAt; // 旧数据回填完成日期
         settings.DockOffset = double.IsFinite(settings.DockOffset) ? settings.DockOffset : 0;
         settings.DockLift = double.IsFinite(settings.DockLift) && settings.DockLift > 0 ? settings.DockLift : 0;
         settings.ReflectionRatio = double.IsFinite(settings.ReflectionRatio) ? Math.Clamp(settings.ReflectionRatio,0,1) : 0;

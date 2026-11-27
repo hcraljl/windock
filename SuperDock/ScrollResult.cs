@@ -14,8 +14,8 @@ sealed class ScrollResult : Window
     {
         this.image=image;this.settings=settings;
         Title="windock · 滚动截图";Width=560;Height=600;WindowStartupLocation=WindowStartupLocation.CenterScreen;ShowInTaskbar=false;Background=GlassWindow.Surface;Foreground=Theme.Text;ResizeMode=ResizeMode.CanResize;
-        var viewer=new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Background=Brushes.Transparent};
-        var preview=new Image{Source=image,Stretch=Stretch.None,HorizontalAlignment=HorizontalAlignment.Center};
+        var viewer=new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,Background=Brushes.Transparent};
+        var preview=new Image{Source=image,Stretch=Stretch.None,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top};
         RenderOptions.SetBitmapScalingMode(preview,BitmapScalingMode.HighQuality);
         viewer.Content=preview;
         var actions=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,12,0,0)};
@@ -33,6 +33,11 @@ sealed class ScrollResult : Window
         DockPanel.SetDock(actions,Dock.Bottom);
         layout.Children.Add(actions);layout.Children.Add(viewer);
         Content=new Border{Padding=new Thickness(18,14,18,14),Child=layout};
+        // 窗口宽度跟随长图：宽度不超过工作区时一屏看全（此前居中裁切两侧且无横向滚动条，表现为“宽度不全”）
+        Loaded+=(_,_)=>{
+            double target=Math.Min(image.PixelWidth+36+SystemParameters.BorderWidth*2,SystemParameters.WorkArea.Width-48);
+            if(target>Width)Width=target;
+        };
         KeyDown+=(_,e)=>{if(e.Key==Key.Escape)Close();};
     }
     void Copy(){try{System.Windows.Clipboard.SetImage(image);}catch(System.Runtime.InteropServices.COMException){}}
