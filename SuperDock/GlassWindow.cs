@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -7,24 +8,33 @@ namespace SuperDock;
 internal static class GlassWindow
 {
     const double Radius=8; // Match DWMWCP_ROUND; one compositor owns the entire silhouette.
+    // 自定义圆角的窗口（如设置工作台）：DWM 系统圆角只有固定 8px，
+    // 改用分层窗口 + 内容 Border 的圆角绘制，DWM 侧改为 DONOTROUND 避免二次裁切。
+    static readonly ConditionalWeakTable<Window,object?> CustomRadii=new();
+    static double RadiusOf(Window window)=>CustomRadii.TryGetValue(window,out var value)&&value is double radius?radius:Radius;
     [StructLayout(LayoutKind.Sequential)] struct Margins{public int Left,Right,Top,Bottom;}
     [DllImport("dwmapi.dll")]static extern int DwmSetWindowAttribute(IntPtr h,int attribute,ref int value,int size);
     [DllImport("dwmapi.dll")]static extern int DwmExtendFrameIntoClientArea(IntPtr h,ref Margins margins);
     [DllImport("user32.dll")]static extern int SetWindowRgn(IntPtr hwnd,IntPtr region,bool redraw);
     static void UpdateCorners(Window window)
     {
-        if(window.Content is System.Windows.Controls.Border border){border.CornerRadius=new CornerRadius(Radius);RoundClip.SetRadius(border,Radius);}
+        double radius=RadiusOf(window);
+        if(window.Content is System.Windows.Controls.Border border){border.CornerRadius=new CornerRadius(radius);RoundClip.SetRadius(border,radius);}
     }
-    public static void Prepare(Window window)
+    public static void Prepare(Window window,double? radius=null)
     {
         window.Icon=Branding.Logo;
-        window.AllowsTransparency=false;window.Background=Brushes.Transparent;
+        if(radius is { } custom){CustomRadii.Add(window,custom);window.AllowsTransparency=true;}
+        else window.AllowsTransparency=false;
+        window.Background=Brushes.Transparent;
         WindowChrome.SetWindowChrome(window,new WindowChrome{CaptionHeight=0,ResizeBorderThickness=new Thickness(4),GlassFrameThickness=new Thickness(-1),CornerRadius=new CornerRadius(0),UseAeroCaptionButtons=false});
         window.SizeChanged+=(_,_)=>UpdateCorners(window);window.DpiChanged+=(_,_)=>window.Dispatcher.BeginInvoke(new Action(()=>Refresh(window)));
         window.SourceInitialized+=(_,_)=>Refresh(window);window.Loaded+=(_,_)=>UpdateCorners(window);
     }
     public static void Refresh(Window window)
     {
+        UpdateCorners(window);
+        if(CustomRadii.TryGetValue(window,out _))return; // 分层窗口：圆角由内容 Border 绘制，DWM 背景/系统圆角不适用
         var handle=new WindowInteropHelper(window).Handle;if(handle==IntPtr.Zero)return;
         if(HwndSource.FromHwnd(handle)?.CompositionTarget is { } target)target.BackgroundColor=Colors.Transparent;
         // Accent acrylic is rendered as a separate rectangle and can bleed outside SetWindowRgn.

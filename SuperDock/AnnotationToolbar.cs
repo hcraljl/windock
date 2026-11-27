@@ -60,7 +60,7 @@ internal static class AnnotationToolbar
         }
         Border Chip(string tip,FrameworkElement icon,Action action)
         {
-            var chip=new Border{Height=30,MinWidth=32,CornerRadius=new CornerRadius(7),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=icon,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
+            var chip=new Border{Height=36,MinWidth=40,CornerRadius=new CornerRadius(8),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=icon,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
             chip.MouseEnter+=(_,_)=>{hovered=chip;Restyle();};
             chip.MouseLeave+=(_,_)=>{hovered=null;Restyle();};
             chip.MouseLeftButtonUp+=(_,_)=>action();
@@ -76,25 +76,25 @@ internal static class AnnotationToolbar
             var chip=Chip(tip,icon??Icon(glyph),()=>Select(tool));
             toolChips[chip]=tool;tools.Children.Add(chip);
         }
-        ToolButton("\uE72A","矩形",AnnotationLayer.Tool.Rect,icon:new Rectangle{Width=15,Height=15,RadiusX=3.5,RadiusY=3.5,Stroke=IconFg,StrokeThickness=1.6,Fill=Brushes.Transparent});
+        ToolButton("\uE72A","矩形",AnnotationLayer.Tool.Rect,icon:new Rectangle{Width=18,Height=18,RadiusX=4.5,RadiusY=4.5,Stroke=IconFg,StrokeThickness=1.8,Fill=Brushes.Transparent});
         ToolButton("","椭圆",AnnotationLayer.Tool.Ellipse,icon:EllipseIcon());
         ToolButton("\uE72A","箭头",AnnotationLayer.Tool.Arrow);
         ToolButton("\uE70F","画笔",AnnotationLayer.Tool.Pen);
         // 马赛克：2×2 像素块
-        var mosaicGrid=new Grid{RowDefinitions={new RowDefinition(),new RowDefinition()},ColumnDefinitions={new ColumnDefinition(),new ColumnDefinition()},Width=15,Height=15,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        var mosaicGrid=new Grid{RowDefinitions={new RowDefinition(),new RowDefinition()},ColumnDefinitions={new ColumnDefinition(),new ColumnDefinition()},Width=18,Height=18,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         for(int i=0;i<4;i++)
         {
-            var block=new Rectangle{Width=6.2,Height=6.2,RadiusX=1.4,RadiusY=1.4,Fill=IconFg};
+            var block=new Rectangle{Width=7.4,Height=7.4,RadiusX=1.7,RadiusY=1.7,Fill=IconFg};
             Grid.SetRow(block,i/2);Grid.SetColumn(block,i%2);
             mosaicGrid.Children.Add(block);
         }
         ToolButton("","马赛克",AnnotationLayer.Tool.Mosaic,icon:mosaicGrid);
-        ToolButton("","文本",AnnotationLayer.Tool.Text,icon:new TextBlock{Text="T",FontSize=15,FontWeight=FontWeights.Bold,Foreground=IconFg,FontFamily=new FontFamily("Georgia, Segoe UI"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center});
+        ToolButton("","文本",AnnotationLayer.Tool.Text,icon:new TextBlock{Text="T",FontSize=18,FontWeight=FontWeights.Bold,Foreground=IconFg,FontFamily=new FontFamily("Georgia, Segoe UI"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center});
         // 水印：四道斜杠
-        var markIcon=new Canvas{Width=16,Height=16};
+        var markIcon=new Canvas{Width=19,Height=19};
         for(int i=0;i<4;i++)
         {
-            var line=new Line{X1=.5+i*4.2,Y1=14.5,X2=4.5+i*4.2,Y2=1.5,Stroke=IconFg,StrokeThickness=1.7,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round};
+            var line=new Line{X1=.5+i*5,Y1=17.5,X2=5.5+i*5,Y2=1.5,Stroke=IconFg,StrokeThickness=1.9,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round};
             markIcon.Children.Add(line);
         }
         ToolButton("","水印",AnnotationLayer.Tool.Watermark,icon:markIcon);
@@ -103,14 +103,14 @@ internal static class AnnotationToolbar
         FrameworkElement ShapeOptions() // 形状/画笔共用：颜色 + 粗细
         {
             var panel=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(2,2,0,0)};
-            var current=new Border{Width=16,Height=16,CornerRadius=new CornerRadius(8),Background=new SolidColorBrush(layer.Color),BorderBrush=new SolidColorBrush(Color.FromArgb(200,36,54,77)),BorderThickness=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)};
+            var current=new Border{Width=18,Height=18,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(layer.Color),BorderBrush=new SolidColorBrush(Color.FromArgb(200,36,54,77)),BorderThickness=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)};
             panel.Children.Add(current);
-            var slider=new Slider{Minimum=2,Maximum=8,Value=layer.StrokeWidth,Width=90,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0)};
+            var slider=new Slider{Minimum=2,Maximum=8,Value=layer.StrokeWidth,Width=108,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0)};
             slider.ValueChanged+=(_,_)=>layer.StrokeWidth=slider.Value;
             panel.Children.Add(TrackWrap(slider));
             foreach(var(_,color) in Palette)
             {
-                var swatch=new Border{Width=17,Height=17,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center};
+                var swatch=new Border{Width=20,Height=20,CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center};
                 swatch.MouseEnter+=(_,_)=>swatch.Opacity=.8;
                 swatch.MouseLeave+=(_,_)=>swatch.Opacity=1;
                 swatch.MouseLeftButtonUp+=(_,_)=>{layer.Color=color;RestyleColors();};
@@ -135,8 +135,8 @@ internal static class AnnotationToolbar
         FrameworkElement MosaicOptions()
         {
             var panel=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(2,2,0,0)};
-            panel.Children.Add(new TextBlock{Text="强度",FontSize=12,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)});
-            var slider=new Slider{Minimum=6,Maximum=30,Value=layer.MosaicStrength,Width=110,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
+            panel.Children.Add(new TextBlock{Text="强度",FontSize=13,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)});
+            var slider=new Slider{Minimum=6,Maximum=30,Value=layer.MosaicStrength,Width=132,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
             slider.ValueChanged+=(_,_)=>layer.MosaicStrength=(int)slider.Value;
             panel.Children.Add(TrackWrap(slider));
             return panel;
@@ -144,19 +144,19 @@ internal static class AnnotationToolbar
         FrameworkElement TextOptions()
         {
             var panel=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(2,2,0,0)};
-            panel.Children.Add(new TextBlock{Text="字号",FontSize=12,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)});
-            var size=new ComboBox{Width=74,Height=26,FontSize=12,VerticalContentAlignment=VerticalAlignment.Center,SelectedIndex=2};
+            panel.Children.Add(new TextBlock{Text="字号",FontSize=13,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,8,0)});
+            var size=new ComboBox{Width=84,Height=30,FontSize=13,VerticalContentAlignment=VerticalAlignment.Center,SelectedIndex=2};
             foreach(var v in new[]{12,14,16,18,20,24})size.Items.Add(new ComboBoxItem{Content=v.ToString()});
             size.SelectionChanged+=(_,_)=>{
                 if(size.SelectedItem is ComboBoxItem item&&int.TryParse(item.Content+"",out var v))layer.ApplyFontSize(v);
             };
             panel.Children.Add(size);
-            panel.Children.Add(new Border{Width=1,Height=16,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(10,0,10,0),VerticalAlignment=VerticalAlignment.Center});
-            var current=new Border{Width=16,Height=16,CornerRadius=new CornerRadius(8),Background=new SolidColorBrush(layer.Color),BorderBrush=new SolidColorBrush(Color.FromArgb(200,36,54,77)),BorderThickness=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,8,0)};
+            panel.Children.Add(new Border{Width=1,Height=20,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(10,0,10,0),VerticalAlignment=VerticalAlignment.Center});
+            var current=new Border{Width=18,Height=18,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(layer.Color),BorderBrush=new SolidColorBrush(Color.FromArgb(200,36,54,77)),BorderThickness=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,8,0)};
             panel.Children.Add(current);
             foreach(var(_,color) in Palette)
             {
-                var swatch=new Border{Width=17,Height=17,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center};
+                var swatch=new Border{Width=20,Height=20,CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center};
                 swatch.MouseLeftButtonUp+=(_,_)=>{
                     layer.Color=color;
                     current.Background=new SolidColorBrush(layer.Color);
@@ -169,21 +169,21 @@ internal static class AnnotationToolbar
         FrameworkElement WatermarkOptions()
         {
             var panel=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(2,2,0,0)};
-            var input=new TextBox{Width=104,Height=26,FontSize=12,Padding=new Thickness(6,1,6,1),VerticalContentAlignment=VerticalAlignment.Center,Text=layer.WatermarkText};
+            var input=new TextBox{Width=124,Height=30,FontSize=13,Padding=new Thickness(7,2,7,2),VerticalContentAlignment=VerticalAlignment.Center,Text=layer.WatermarkText};
             input.TextChanged+=(_,_)=>layer.WatermarkText=input.Text;
             panel.Children.Add(input);
-            panel.Children.Add(new Border{Width=1,Height=16,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(8,0,8,0),VerticalAlignment=VerticalAlignment.Center});
+            panel.Children.Add(new Border{Width=1,Height=20,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(8,0,8,0),VerticalAlignment=VerticalAlignment.Center});
             foreach(var(_,color) in Palette)
             {
-                var swatch=new Border{Width=17,Height=17,CornerRadius=new CornerRadius(9),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center,Opacity=color==layer.WatermarkColor?1:.55};
+                var swatch=new Border{Width=20,Height=20,CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(color),BorderBrush=new SolidColorBrush(Color.FromArgb(60,36,54,77)),BorderThickness=new Thickness(1),Cursor=Cursors.Hand,Margin=new Thickness(3,0,3,0),Tag=color,VerticalAlignment=VerticalAlignment.Center,Opacity=color==layer.WatermarkColor?1:.55};
                 swatch.MouseLeftButtonUp+=(_,_)=>{
                     layer.WatermarkColor=color;
                     foreach(var child in panel.Children)if(child is Border{Tag:Color c} s){s.Opacity=c==layer.WatermarkColor?1:.55;s.BorderThickness=new Thickness(c==layer.WatermarkColor?2:1);s.BorderBrush=c==layer.WatermarkColor?new SolidColorBrush(Color.FromRgb(35,125,245)):new SolidColorBrush(Color.FromArgb(60,36,54,77));}
                 };
                 panel.Children.Add(swatch);
             }
-            panel.Children.Add(new TextBlock{Text="透明度",FontSize=12,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,8,0)});
-            var slider=new Slider{Minimum=10,Maximum=80,Value=layer.WatermarkOpacity*100,Width=90,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
+            panel.Children.Add(new TextBlock{Text="透明度",FontSize=13,Foreground=LabelFg,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,8,0)});
+            var slider=new Slider{Minimum=10,Maximum=80,Value=layer.WatermarkOpacity*100,Width=108,IsMoveToPointEnabled=true,VerticalAlignment=VerticalAlignment.Center};
             slider.ValueChanged+=(_,_)=>layer.WatermarkOpacity=slider.Value/100;
             panel.Children.Add(TrackWrap(slider));
             return panel;
@@ -202,7 +202,7 @@ internal static class AnnotationToolbar
             owner.Dispatcher.BeginInvoke(new Action(()=>{if(owner is CaptureWindow cw)cw.OnToolbarLayoutChanged();else if(owner is PinnedImage pi)pi.OnToolbarLayoutChanged();}),DispatcherPriority.Loaded);
         }
         // 拖动手柄：按住拖动整个工具条
-        var grip=new Border{Width=24,Height=30,CornerRadius=new CornerRadius(6),Background=Brushes.Transparent,Cursor=Cursors.SizeAll,Child=BuildGrip(),VerticalAlignment=VerticalAlignment.Center};
+        var grip=new Border{Width=28,Height=36,CornerRadius=new CornerRadius(7),Background=Brushes.Transparent,Cursor=Cursors.SizeAll,Child=BuildGrip(),VerticalAlignment=VerticalAlignment.Center};
         var gripStart=new Point();var gripDragging=false;
         grip.MouseLeftButtonDown+=(_,e)=>{gripDragging=true;gripStart=e.GetPosition(owner);grip.CaptureMouse();e.Handled=true;};
         grip.MouseMove+=(_,e)=>{if(!gripDragging)return;var p=e.GetPosition(owner);onGripDrag(new Vector(p.X-gripStart.X,p.Y-gripStart.Y));gripStart=p;e.Handled=true;};
@@ -246,25 +246,25 @@ internal static class AnnotationToolbar
         }
     }
     // 滑动条外罩一层浅灰底托，让轨道位置一目了然。
-    static FrameworkElement TrackWrap(Slider slider)=>new Border{Background=new SolidColorBrush(Color.FromRgb(234,237,241)),CornerRadius=new CornerRadius(9),Padding=new Thickness(6,2,6,2),VerticalAlignment=VerticalAlignment.Center,Child=slider};
+    static FrameworkElement TrackWrap(Slider slider)=>new Border{Background=new SolidColorBrush(Color.FromRgb(234,237,241)),CornerRadius=new CornerRadius(10),Padding=new Thickness(7,3,7,3),VerticalAlignment=VerticalAlignment.Center,Child=slider};
     static FrameworkElement BuildGrip()
     {
         var grid=new Grid{RowDefinitions={new RowDefinition(),new RowDefinition(),new RowDefinition()},ColumnDefinitions={new ColumnDefinition(),new ColumnDefinition()},HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         for(int r=0;r<3;r++)for(int c=0;c<2;c++)
         {
-            var dot=new Ellipse{Width=2.6,Height=2.6,Fill=new SolidColorBrush(Color.FromRgb(150,158,168))};
+            var dot=new Ellipse{Width=3,Height=3,Fill=new SolidColorBrush(Color.FromRgb(150,158,168))};
             Grid.SetRow(dot,r);Grid.SetColumn(dot,c);
             grid.Children.Add(dot);
         }
         return grid;
     }
-    static FrameworkElement Icon(string glyph)=>new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=15,Foreground=IconFg,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
-    static FrameworkElement EllipseIcon()=>new Ellipse{Width=14,Height=14,Stroke=IconFg,StrokeThickness=1.7,Fill=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
-    static FrameworkElement Separator()=>new Border{Width=1,Height=18,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(3,0,3,0),VerticalAlignment=VerticalAlignment.Center};
+    static FrameworkElement Icon(string glyph)=>new TextBlock{Text=glyph,FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=18,Foreground=IconFg,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+    static FrameworkElement EllipseIcon()=>new Ellipse{Width=17,Height=17,Stroke=IconFg,StrokeThickness=1.9,Fill=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+    static FrameworkElement Separator()=>new Border{Width=1,Height=22,Background=new SolidColorBrush(Color.FromArgb(40,36,54,77)),Margin=new Thickness(3,0,3,0),VerticalAlignment=VerticalAlignment.Center};
     // 动作图标：宿主创建后追加。
     public static FrameworkElement ActionChip(string glyph,string tip,Action action,Brush? foreground=null)
     {
-        var chip=new Border{Height=30,MinWidth=32,CornerRadius=new CornerRadius(7),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=Icon(glyph),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
+        var chip=new Border{Height=36,MinWidth=40,CornerRadius=new CornerRadius(8),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=Icon(glyph),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
         if(foreground!=null&&chip.Child is ContentPresenter{Content:TextBlock t})t.Foreground=foreground;
         chip.MouseEnter+=(_,_)=>chip.Background=HoverBrush;
         chip.MouseLeave+=(_,_)=>chip.Background=Brushes.Transparent;
@@ -273,7 +273,7 @@ internal static class AnnotationToolbar
     }
     public static FrameworkElement ActionChip(FrameworkElement icon,string tip,Action action)
     {
-        var chip=new Border{Height=30,MinWidth=32,CornerRadius=new CornerRadius(7),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=icon,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
+        var chip=new Border{Height=36,MinWidth=40,CornerRadius=new CornerRadius(8),Background=Brushes.Transparent,Cursor=Cursors.Hand,Child=new ContentPresenter{Content=icon,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center},ToolTip=tip};
         chip.MouseEnter+=(_,_)=>chip.Background=HoverBrush;
         chip.MouseLeave+=(_,_)=>chip.Background=Brushes.Transparent;
         chip.MouseLeftButtonUp+=(_,_)=>action();

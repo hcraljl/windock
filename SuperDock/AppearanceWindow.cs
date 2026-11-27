@@ -24,7 +24,7 @@ internal sealed partial class AppearanceWindow : Window
         Theme.Apply(settings.ThemeMode);pageTitle.Foreground=Ink;pageCaption.Foreground=Muted;this.settings=settings;this.changed=changed;this.addEntry=addEntry;systemSettings=taskbarSettings;this.quit=quit;
         Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/Windock;component/SettingsTheme.xaml",UriKind.Relative)});ApplyGlassResources();Title="windock · 设置";Width=800;Height=660;MaxHeight=Math.Max(420,SystemParameters.WorkArea.Height-40);MaxWidth=Math.Max(600,SystemParameters.WorkArea.Width-40);MinWidth=700;MinHeight=480;Width=Math.Min(Width,MaxWidth);Height=Math.Min(Height,MaxHeight);
         WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;ResizeMode=ResizeMode.CanResizeWithGrip;ShowInTaskbar=false;Topmost=true;WindowStartupLocation=WindowStartupLocation.CenterScreen;FontFamily=new FontFamily("Segoe UI, Microsoft YaHei UI");Foreground=Ink;UseLayoutRounding=true;
-        GlassWindow.Prepare(this);var shell=new Border{CornerRadius=new CornerRadius(24),BorderThickness=new Thickness(1),BorderBrush=Stroke,Background=PageBg};Content=shell;
+        GlassWindow.Prepare(this,24);var shell=new Border{CornerRadius=new CornerRadius(24),BorderThickness=new Thickness(1),BorderBrush=Stroke,Background=PageBg};Content=shell;
         var layout=new Grid();layout.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(176)});layout.ColumnDefinitions.Add(new ColumnDefinition());shell.Child=layout;
         var sidebarSurface=new Border{Background=SidebarBrush,CornerRadius=new CornerRadius(8,0,0,8)};layout.Children.Add(sidebarSurface);var sidebar=new DockPanel{Margin=new Thickness(12,18,12,18)};sidebarSurface.Child=sidebar;
         var brand=new StackPanel{Margin=new Thickness(0,0,0,18)};DockPanel.SetDock(brand,Dock.Top);sidebar.Children.Add(brand);
@@ -268,6 +268,7 @@ internal sealed partial class AppearanceWindow : Window
     void ShortcutPreferences()
     {
         Heading("全局快捷键");
+        content.Children.Add(Text("按 Alt+S 可随时打开或关闭设置窗口。",11));
         Toggle("快捷键显隐","隐藏后再次按快捷键显示 Dock",settings.DockHotkeyEnabled,v=>settings.DockHotkeyEnabled=v);
         var shortcuts=new UniformGrid{Columns=3,Width=380,HorizontalAlignment=HorizontalAlignment.Left};foreach(var key in new[]{"Alt+D","Ctrl+Alt+D","Ctrl+Shift+D"}){var button=Button(key,()=>{settings.DockHotkey=key;changed();Navigate(page);});button.Background=settings.DockHotkey==key?Wash:SettingsCard;button.Margin=new Thickness(4);shortcuts.Children.Add(button);}content.Children.Add(shortcuts);content.Children.Add(Text(MainWindow.ShortcutStatus,11));Toggle("文件搜索快捷键","Alt+空格或 Ctrl+Alt+F 打开原版搜索窗口",settings.FileSearchHotkeyEnabled,v=>settings.FileSearchHotkeyEnabled=v);var searchKeys=new StackPanel{Orientation=Orientation.Horizontal};foreach(var key in new[]{"Alt+Space","Ctrl+Alt+F"}){var option=Button(key=="Alt+Space"?"Alt+空格":key,()=>{settings.FileSearchHotkey=key;changed();Navigate(page);});option.Background=settings.FileSearchHotkey==key?Wash:SettingsCard;option.Margin=new Thickness(0,0,8,8);searchKeys.Children.Add(option);}content.Children.Add(searchKeys);content.Children.Add(Text(MainWindow.FileSearchShortcutStatus,11));
         Heading("截图与贴图");
@@ -406,13 +407,13 @@ internal sealed partial class AppearanceWindow : Window
         Toggle("磁盘空间","系统磁盘剩余容量",settings.StorageWidget,v=>settings.StorageWidget=v,true);
         Heading("显示颜色");
         var palette=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,10)};
-        foreach(var(name,hex) in new[]{("白色","#FFFFFF"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")})
+        foreach(var(name,hex) in new[]{("白色","#FFFFFF"),("黑色","#000000"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")})
         {
             var swatch=new Border{Width=30,Height=30,CornerRadius=new CornerRadius(15),Background=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)),BorderBrush=settings.WidgetColor==hex?new SolidColorBrush(System.Windows.Media.Color.FromRgb(96,171,255)):new SolidColorBrush(System.Windows.Media.Color.FromArgb(90,255,255,255)),BorderThickness=new Thickness(settings.WidgetColor==hex?2.4:1),Cursor=Cursors.Hand,Margin=new Thickness(0,0,8,0),ToolTip=name};
             swatch.MouseLeftButtonUp+=(_,_)=>{settings.WidgetColor=hex;WidgetPaint.Apply(hex);changed();Navigate(page);};
             palette.Children.Add(swatch);
         }
-        var colorName=new TextBlock{Text="当前："+(new[]{("白色","#FFFFFF"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")}.FirstOrDefault(c=>c.Item2==settings.WidgetColor).Item1??settings.WidgetColor),FontSize=12,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center};
+        var colorName=new TextBlock{Text="当前："+(new[]{("白色","#FFFFFF"),("黑色","#000000"),("暖黄","#FFD66E"),("橘色","#FFA45C"),("粉色","#FF9EC4"),("天蓝","#7FC5F5"),("薄荷绿","#7FE0C3"),("淡紫","#BFA8FF"),("青灰","#C4D3E0")}.FirstOrDefault(c=>c.Item2==settings.WidgetColor).Item1??settings.WidgetColor),FontSize=12,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center};
         palette.Children.Add(colorName);
         content.Children.Add(new Border{Background=SettingsCard,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(0),CornerRadius=new CornerRadius(16),Padding=new Thickness(14),Margin=new Thickness(6,6,6,14),Child=palette});
         content.Children.Add(Text("切换后立即生效，并随配置保存。",11));

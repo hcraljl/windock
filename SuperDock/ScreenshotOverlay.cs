@@ -253,7 +253,7 @@ sealed class CaptureWindow : Window
             var pin=AnnotationToolbar.ActionChip("\uE718","贴到屏幕",PinCurrent);
             var scroll=AnnotationToolbar.ActionChip("\uE8C6","滚动截图",()=>{
                 // 选项子行显示“开始滚动”按钮；点击后自动向下滚动并拼接长图
-                var start=new Border{Background=new SolidColorBrush(Color.FromRgb(35,125,245)),CornerRadius=new CornerRadius(13),Height=26,Padding=new Thickness(14,0,14,0),Cursor=Cursors.Hand,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,2,0,0),Child=new StackPanel{Orientation=Orientation.Horizontal,Children={new TextBlock{Text="\uE768",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center},new TextBlock{Text=" 开始滚动",FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center}}},ToolTip="开始滚动截图"};
+                var start=new Border{Background=new SolidColorBrush(Color.FromRgb(35,125,245)),CornerRadius=new CornerRadius(13),Height=30,Padding=new Thickness(14,0,14,0),Cursor=Cursors.Hand,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,2,0,0),Child=new StackPanel{Orientation=Orientation.Horizontal,Children={new TextBlock{Text="\uE768",FontFamily=new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center},new TextBlock{Text=" 开始滚动",FontSize=12,Foreground=Brushes.White,VerticalAlignment=VerticalAlignment.Center}}},ToolTip="开始滚动截图"};
                 start.MouseEnter+=(_,_)=>start.Opacity=.85;start.MouseLeave+=(_,_)=>start.Opacity=1;
                 start.MouseLeftButtonUp+=(_,_)=>StartScrollCapture();
                 AnnotationToolbar.SetOptions(toolbarRow,start);
@@ -262,7 +262,7 @@ sealed class CaptureWindow : Window
             var cancel=AnnotationToolbar.ActionChip("\uE711","退出",Close,new SolidColorBrush(Color.FromRgb(229,72,77)));
             var done=AnnotationToolbar.ActionChip("\uE73E","复制",CopySelection,new SolidColorBrush(Color.FromRgb(46,164,90)));
             toolbarRow=(StackPanel)AnnotationToolbar.Build(layer,this,OnGripDrag,2,pin,scroll,save,cancel,done);
-            toolbar=new Border{CornerRadius=new CornerRadius(10),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(6,5,6,5),Child=toolbarRow,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
+            toolbar=new Border{CornerRadius=new CornerRadius(12),Background=new SolidColorBrush(Color.FromArgb(246,252,253,255)),BorderBrush=new SolidColorBrush(Color.FromArgb(40,36,54,77)),BorderThickness=new Thickness(1),Padding=new Thickness(8,6,8,6),Child=toolbarRow,Effect=new System.Windows.Media.Effects.DropShadowEffect{BlurRadius=16,ShadowDepth=3,Opacity=.3},Cursor=Cursors.Hand};
             chrome.Children.Add(toolbar);
         }
         PlaceToolbar();toolbar.Visibility=Visibility.Visible;
